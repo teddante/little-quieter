@@ -13,6 +13,9 @@ $files = @(
     'LATENCY-AND-PERFORMANCE.md', 'CONTRIBUTING.md', 'THIRD-PARTY-NOTICES.txt'
 ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
 $files += Join-Path $PSScriptRoot 'work\publish\Little Quieter.exe'
+$setup = Join-Path $PSScriptRoot 'work\publish\Little Quieter Setup.exe'
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'work\publish\Little Quieter.exe') -Destination $setup -Force
+$files += $setup
 Compress-Archive -LiteralPath $files -DestinationPath $packagePath -Force
 $checksum = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
 "$checksum  $packageName" | Set-Content -LiteralPath (Join-Path $packageFolder "LittleQuieter-$version-SHA256SUMS.txt") -Encoding ascii

@@ -11,6 +11,17 @@ internal sealed class AudioDevice
     public bool Unavailable;
     public override string ToString() => Unavailable ? Name + " (unavailable)" : Name;
 
+    public static AudioDevice Select(List<AudioDevice> devices, string? id, string name, string defaultName)
+    {
+        if (id != null)
+            return devices.Find(device => device.Id == id) ?? new AudioDevice { Id = id, Name = name, Unavailable = true };
+        if (name == defaultName)
+            return devices[0];
+        // Migrate old name-only preferences only when the match is unambiguous.
+        var matches = devices.Where(device => device.Id != null && device.Name == name).ToArray();
+        return matches.Length == 1 ? matches[0] : new AudioDevice { Name = name, Unavailable = true };
+    }
+
     public static List<AudioDevice> List(DataFlow flow)
     {
         var result = new List<AudioDevice> { new AudioDevice { Name = flow == DataFlow.Capture ? DefaultMicrophoneName : DefaultOutputName } };

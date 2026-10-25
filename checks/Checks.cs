@@ -4,7 +4,7 @@ using NAudio.Wave;
 
 namespace LittleQuieter;
 
-internal static class Checks
+internal static partial class Checks
 {
     private static int count;
     private static void Assert(bool valid, string label)
@@ -18,6 +18,15 @@ internal static class Checks
     {
         try
         {
+            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.SetColorMode(args.Contains("--dark") ? SystemColorMode.Dark : args.Contains("--preview") ? SystemColorMode.Classic : SystemColorMode.System);
+            if (args.Length > 1 && args[0] == "--preview")
+            {
+                WindowChecks(() => PreviewWindow(args[1]));
+                return 0;
+            }
             if (args.Length > 0 && args[0] == "--audio")
             {
                 AudioCheck();
@@ -39,7 +48,10 @@ internal static class Checks
             AnalyzerChecks();
             SettingsChecks();
             ScheduleChecks();
+            DeviceSelectionChecks();
+            InstallationChecks();
             WindowChecks();
+            WindowChecks(RecoveryWindowCheck);
             Console.WriteLine("All " + count + " checks passed.");
             return 0;
         }
@@ -274,7 +286,18 @@ internal static class Checks
             Assert(Preferences.Load(path).Limit == 95, "settings validate and replace atomically");
             Assert(Preferences.Load(path).OutputDeviceId == "explicit-test-device", "app-only output selection persists");
             File.WriteAllText(path, "broken XML");
-            Assert(Preferences.Load(path).Limit == 65, "damaged preferences fall back safely");
+            var damaged = Preferences.Load(path);
+            Assert(damaged.NeedsRecovery && !damaged.PlayTone && damaged.ToneVolume == 0, "damaged preferences pause sound and require recovery");
+            bool refused = false;
+            try
+            {
+                damaged.Save(path);
+            }
+            catch (InvalidOperationException) { refused = true; }
+            Assert(refused && File.ReadAllText(path) == "broken XML", "automatic saving cannot overwrite damaged settings");
+            string backup = damaged.Recover(path);
+            Assert(File.ReadAllText(backup) == "broken XML" && !Preferences.Load(path).NeedsRecovery, "explicit recovery preserves an exact original backup before writing new settings");
+            File.Delete(backup);
             File.WriteAllText(path, "<Preferences xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:nil=\"true\" />");
             Assert(Preferences.Load(path).Limit == 65, "an empty XML settings object falls back safely");
             File.WriteAllText(path, "<Preferences xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><DeviceName xsi:nil=\"true\"/><OutputDeviceName xsi:nil=\"true\"/></Preferences>");
@@ -348,7 +371,7 @@ internal static class Checks
         string folder = Path.Combine(Path.GetTempPath(), "LittleQuieter-window-check-" + Guid.NewGuid().ToString("N"));
         string path = Path.Combine(folder, "settings.xml");
         const string deviceName = "Test output (unavailable)";
-        new Preferences { Limit = 50, PlayTone = false, ToneVolume = 0, OutputDeviceId = "missing-test-output", OutputDeviceName = deviceName }.Save(path);
+        new Preferences { Limit = 50, PlayTone = false, ToneVolume = 0, DeviceId = "missing-test-mic", DeviceName = "Disconnected microphone", OutputDeviceId = "missing-test-output", OutputDeviceName = deviceName }.Save(path);
         try
         {
             using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
@@ -357,7 +380,8 @@ internal static class Checks
             _ = window.Handle;
             try
             {
-                var output = window.Controls.OfType<ComboBox>().Single(control => control.AccessibleName == "Alarm output. Only changes Little Quieter");
+                CheckWindowImprovements(window, path);
+                var output = Descendants(window).OfType<ComboBox>().Single(control => control.AccessibleName == "Alarm output. Only changes Little Quieter");
                 Assert(output.SelectedItem is AudioDevice { Id: "missing-test-output", Name: deviceName, Unavailable: true },
                     "window preserves a disconnected output instead of routing an alarm elsewhere");
                 var saved = Preferences.Load(path);
@@ -366,17 +390,17 @@ internal static class Checks
                 output.SelectedIndex = 0;
                 window.LoadDevices();
                 Assert(output.SelectedItem is AudioDevice { Id: null }, "refresh retains an unsaved switch to Windows default output");
-                var pickers = window.Controls.OfType<DateTimePicker>().ToArray();
-                var enabled = window.Controls.OfType<CheckBox>().Single(control => control.AccessibleName == "Listen on a daily schedule");
+                var pickers = Descendants(window).OfType<DateTimePicker>().ToArray();
+                var enabled = Descendants(window).OfType<CheckBox>().Single(control => control.AccessibleName == "Listen on a daily schedule");
                 Assert(!enabled.Checked && pickers.Length == 2 && pickers.All(picker => picker.Enabled && picker.CustomFormat == "HH:mm"),
                     "scheduling defaults off and its hours can be chosen before enabling it");
                 pickers[0].Value = DateTime.Now.AddHours(1);
                 pickers[1].Value = DateTime.Now.AddHours(2);
                 enabled.Checked = true;
-                Assert(!window.IsListening && !window.Controls.OfType<Button>().Single(button => button.Text == "Learn my normal voice").Enabled,
+                Assert(!window.IsListening && !Descendants(window).OfType<Button>().Single(button => button.Text == "Learn my normal voice").Enabled,
                     "outside scheduled hours the window stays paused with calibration disabled");
                 pickers[1].Value = pickers[0].Value;
-                Assert(!window.IsListening && window.Controls.OfType<Label>().Any(label => label.Text.StartsWith("Choose different start")),
+                Assert(!window.IsListening && Descendants(window).OfType<Label>().Any(label => label.Text.StartsWith("Choose different start")),
                     "equal schedule times clearly explain why listening stays off");
             }
             finally { window.Close(); }
@@ -384,6 +408,7 @@ internal static class Checks
             var scheduled = Preferences.Load(path);
             Assert(scheduled.ScheduleEnabled && scheduled.ScheduleStartMinute == scheduled.ScheduleEndMinute,
                 "daily schedule choice and times survive saving and reopening settings");
+            Assert(!scheduled.ShowReminder && scheduled.DeviceId == "missing-test-mic", "reminder visibility and missing microphone identity survive saving and reopening settings");
         }
         finally { File.Delete(path); Directory.Delete(folder); }
     }
@@ -476,17 +501,19 @@ internal static class Checks
         Console.WriteLine("Installed app window: " + (app.MainWindowHandle == IntPtr.Zero ? "hidden" : "open"));
         using var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
         var saved = Preferences.Load(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LittleQuieter", "settings.xml"));
-        string? microphoneId = AudioDevice.List(NAudio.CoreAudioApi.DataFlow.Capture).Find(device => device.Name == saved.DeviceName)?.Id;
+        bool expectedListening = !saved.ScheduleEnabled || DailySchedule.ActivePeriodStart(saved.ScheduleStartMinute, saved.ScheduleEndMinute, DateTime.Now).HasValue;
         foreach (var flow in new[] { NAudio.CoreAudioApi.DataFlow.Capture, NAudio.CoreAudioApi.DataFlow.Render })
         {
-            string? deviceId = flow == NAudio.CoreAudioApi.DataFlow.Capture ? microphoneId : saved.OutputDeviceId;
-            using var endpoint = deviceId == null ? enumerator.GetDefaultAudioEndpoint(flow, NAudio.CoreAudioApi.Role.Console) : enumerator.GetDevice(deviceId);
-            var sessions = endpoint.AudioSessionManager.Sessions;
             bool active = false;
-            for (int i = 0; i < sessions.Count; i++)
-                if (sessions[i].GetProcessID == app.Id && sessions[i].State == NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateActive)
-                    active = true;
-            Assert(active, "Windows confirms the app's active " + flow + " session");
+            foreach (var endpoint in enumerator.EnumerateAudioEndPoints(flow, NAudio.CoreAudioApi.DeviceState.Active))
+                using (endpoint)
+                {
+                    var sessions = endpoint.AudioSessionManager.Sessions;
+                    for (int i = 0; i < sessions.Count; i++)
+                        if (sessions[i].GetProcessID == app.Id && sessions[i].State == NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateActive)
+                            active = true;
+                }
+            Assert(active == expectedListening, "Windows confirms " + flow + (expectedListening ? " is active during listening hours" : " is off outside scheduled hours"));
         }
         Assert(StartupRegistration.Enabled, "startup remains registered");
         return 0;

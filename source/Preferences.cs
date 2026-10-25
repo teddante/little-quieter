@@ -8,12 +8,23 @@ public sealed class Preferences
     public int Limit = Levels.DefaultLimit;
     public bool PlayTone = true;
     public int ToneVolume = 35;
+    public string? DeviceId;
     public string DeviceName = AudioDevice.DefaultMicrophoneName;
     public string? OutputDeviceId;
     public string OutputDeviceName = AudioDevice.DefaultOutputName;
     public bool ScheduleEnabled;
     public int ScheduleStartMinute = 22 * 60;
     public int ScheduleEndMinute = 7 * 60;
+    public bool ShowReminder = true;
+
+    internal bool IsNew
+    {
+        get; private set;
+    }
+    internal bool NeedsRecovery
+    {
+        get; private set;
+    }
 
     public void Validate()
     {
@@ -32,17 +43,36 @@ public sealed class Preferences
         try
         {
             using var input = File.OpenRead(path);
-            var settings = Serializer.Deserialize(input) as Preferences ?? new Preferences();
+            var settings = Serializer.Deserialize(input) as Preferences ?? throw new InvalidOperationException("The settings file is empty.");
             settings.Validate();
             return settings;
         }
-        catch (IOException) { return new Preferences(); }
-        catch (UnauthorizedAccessException) { return new Preferences(); }
-        catch (InvalidOperationException) { return new Preferences(); }
+        catch (FileNotFoundException) { return new Preferences { IsNew = true }; }
+        catch (DirectoryNotFoundException) { return new Preferences { IsNew = true }; }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return new Preferences { NeedsRecovery = true, PlayTone = false, ToneVolume = 0 };
+        }
+    }
+
+    internal string Recover(string path)
+    {
+        string backup = path + ".recovery-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff");
+        // Do not replace an unreadable original if making its backup fails.
+        File.Copy(path, backup);
+        NeedsRecovery = false;
+        try
+        {
+            Save(path);
+        }
+        catch { NeedsRecovery = true; throw; }
+        return backup;
     }
 
     public void Save(string path)
     {
+        if (NeedsRecovery)
+            throw new InvalidOperationException("The original settings are preserved. Recover settings in Little Quieter before saving changes.");
         Validate();
         string? directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(directory))

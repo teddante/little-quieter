@@ -27,7 +27,7 @@ internal sealed partial class MainWindow : Form
 
     private bool ScheduleAllowsListening(DateTime localNow)
     {
-        return !scheduleEnabled.Checked || DailySchedule.ActivePeriodStart(StartMinute, EndMinute, localNow).HasValue;
+        return !preferences.NeedsRecovery && (!scheduleEnabled.Checked || DailySchedule.ActivePeriodStart(StartMinute, EndMinute, localNow).HasValue);
     }
     private void ChangeSchedule()
     {
@@ -39,6 +39,8 @@ internal sealed partial class MainWindow : Form
     }
     internal void ApplySchedule(DateTime localNow)
     {
+        if (preferences.NeedsRecovery)
+            return;
         bool? decision = dailySchedule.Update(scheduleEnabled.Checked, StartMinute, EndMinute, localNow);
         if (decision == true)
             StartListening(true);
@@ -49,6 +51,15 @@ internal sealed partial class MainWindow : Form
     }
     private void UpdateScheduleControls(DateTime localNow)
     {
+        if (preferences.NeedsRecovery)
+        {
+            start.Enabled = trayToggle.Enabled = learn.Enabled = test.Enabled = trayTest.Enabled = false;
+            start.Text = trayToggle.Text = "Recover settings to listen";
+            scheduleCaption.Text = "Recover settings before changing the listening schedule.";
+            stateCaption.Text = "SETTINGS RECOVERY · MICROPHONE OFF";
+            tray.Text = "Little Quieter — settings need recovery";
+            return;
+        }
         bool allowed = ScheduleAllowsListening(localNow);
         start.Enabled = trayToggle.Enabled = learn.Enabled = allowed;
         test.Enabled = trayTest.Enabled = allowed && !calibrating;
@@ -104,7 +115,9 @@ internal sealed partial class MainWindow : Form
     {
         if (input != null)
             return;
-        string previous = (microphones.SelectedItem as AudioDevice)?.Name ?? preferences.DeviceName;
+        var selectedInput = microphones.SelectedItem as AudioDevice;
+        string? inputId = selectedInput == null ? preferences.DeviceId : selectedInput.Id;
+        string inputName = selectedInput?.Name ?? preferences.DeviceName;
         var selectedOutput = outputs.SelectedItem as AudioDevice;
         string? outputId = selectedOutput == null ? preferences.OutputDeviceId : selectedOutput.Id;
         string outputName = selectedOutput?.Name ?? preferences.OutputDeviceName;
@@ -114,18 +127,18 @@ internal sealed partial class MainWindow : Form
         {
             var captureDevices = AudioDevice.List(DataFlow.Capture);
             microphones.Items.AddRange(captureDevices.ToArray());
-            microphones.SelectedIndex = Math.Max(0, captureDevices.FindIndex(device => device.Name == previous));
+            SelectDevice(microphones, AudioDevice.Select(captureDevices, inputId, inputName, AudioDevice.DefaultMicrophoneName));
             var renderDevices = AudioDevice.List(DataFlow.Render);
             outputs.Items.AddRange(renderDevices.ToArray());
-            outputs.SelectedIndex = Math.Max(0, renderDevices.FindIndex(device => device.Id == outputId));
-            if (outputId != null && outputs.SelectedIndex == 0)
-            {
-                // Preserve a disconnected explicit selection; don't silently move a loud alarm elsewhere.
-                outputs.Items.Add(new AudioDevice { Id = outputId, Name = outputName, Unavailable = true });
-                outputs.SelectedIndex = outputs.Items.Count - 1;
-            }
+            SelectDevice(outputs, AudioDevice.Select(renderDevices, outputId, outputName, AudioDevice.DefaultOutputName));
         }
         catch (Exception error) { footer.Text = "Couldn't list audio devices: " + error.Message; }
+    }
+    private static void SelectDevice(ComboBox list, AudioDevice device)
+    {
+        if (!list.Items.Contains(device))
+            list.Items.Add(device);
+        list.SelectedItem = device;
     }
     private void PrepareOutput()
     {
@@ -146,6 +159,11 @@ internal sealed partial class MainWindow : Form
         if (microphones.SelectedItem is not AudioDevice device)
         {
             footer.Text = "Connect a microphone, then click Refresh.";
+            return false;
+        }
+        if (device.Unavailable)
+        {
+            footer.Text = "Your selected microphone is unavailable. Reconnect it and Refresh, or choose another microphone.";
             return false;
         }
         gate.Suspend(true);
@@ -225,7 +243,7 @@ internal sealed partial class MainWindow : Form
         microphones.Enabled = outputs.Enabled = refresh.Enabled = true;
         tray.Text = "Little Quieter — paused";
         stateCaption.Text = "PAUSED · MICROPHONE OFF";
-        stateCaption.ForeColor = Muted;
+        stateCaption.ForeColor = SystemColors.WindowText;
         levelCaption.Text = "—";
         liveCaption.Text = "Start listening to see your microphone level.";
         meter.Level = 0;
@@ -267,7 +285,7 @@ internal sealed partial class MainWindow : Form
         if (!initialized)
         {
             initialized = true;
-            if (background && !scheduleEnabled.Checked)
+            if (background && !preferences.IsNew && !preferences.NeedsRecovery && !scheduleEnabled.Checked)
                 StartListening(true);
         }
         ApplySchedule(DateTime.Now);
@@ -361,13 +379,13 @@ internal sealed partial class MainWindow : Form
         if (calibrating)
         {
             stateCaption.Text = now < calibrationStart ? "LEARNING · GET READY" : "LEARNING · " + Math.Ceiling(calibrationEnd - now) + " SECONDS LEFT";
-            stateCaption.ForeColor = Mint;
+            stateCaption.ForeColor = SystemColors.WindowText;
             liveCaption.Text = "Talk at a comfortable indoor volume.";
         }
         else
         {
             stateCaption.Text = active ? "ABOVE YOUR LIMIT · QUIETEN DOWN" : "LISTENING · WITHIN YOUR LIMIT";
-            stateCaption.ForeColor = active ? Amber : Mint;
+            stateCaption.ForeColor = SystemColors.WindowText;
             liveCaption.Text = clipped ? "Input is clipping. Lower mic gain or move it back." : meter.Level < 3 ? "Very little input. Check your mic if you're speaking." : "Your limit is " + limit.Value + ". Tone follows your microphone level.";
         }
     }
@@ -388,7 +406,7 @@ internal sealed partial class MainWindow : Form
     }
     private void UpdateReminder(bool active, bool previewing)
     {
-        if (!active && !previewing)
+        if (!showReminder.Checked || (!active && !previewing))
             reminder.Hide();
         else if (active != previousActive || previewing != previousPreview)
             reminder.Remind(this, previewing ? "Test tone · two seconds" : "Keep your voice down, please.");
@@ -406,16 +424,39 @@ internal sealed partial class MainWindow : Form
     {
         saveAt = AudioClock.Now + 0.8;
     }
+    private void RecoverPreferences(Control notice)
+    {
+        try
+        {
+            string backup = preferences.Recover(settingsPath);
+            notice.Hide();
+            SetSettingsEnabled(true);
+            footer.Text = "Original settings backed up to " + backup + ". Choose your microphone before starting.";
+            UpdateScheduleControls(DateTime.Now);
+        }
+        catch (Exception error) { MessageBox.Show(this, "Your original settings were kept. " + error.Message, "Settings recovery"); }
+    }
+    private void SetSettingsEnabled(bool enabled)
+    {
+        microphones.Enabled = outputs.Enabled = refresh.Enabled = limit.Enabled = playTone.Enabled =
+            showReminder.Enabled = toneVolume.Enabled = scheduleEnabled.Enabled = scheduleStart.Enabled = scheduleEnd.Enabled = enabled;
+    }
     private void SavePreferences(bool report)
     {
+        if (preferences.NeedsRecovery)
+            return;
         preferences.Limit = limit.Value;
         preferences.PlayTone = playTone.Checked;
         preferences.ToneVolume = (int)toneVolume.Value;
         preferences.ScheduleEnabled = scheduleEnabled.Checked;
         preferences.ScheduleStartMinute = StartMinute;
         preferences.ScheduleEndMinute = EndMinute;
+        preferences.ShowReminder = showReminder.Checked;
         if (microphones.SelectedItem is AudioDevice microphone)
+        {
+            preferences.DeviceId = microphone.Id;
             preferences.DeviceName = microphone.Name;
+        }
         if (outputs.SelectedItem is AudioDevice output)
         {
             preferences.OutputDeviceId = output.Id;
@@ -442,7 +483,6 @@ internal sealed partial class MainWindow : Form
         timer.Stop();
         StopListening("Stopped.");
         watchdog.Dispose();
-        reminder.Close();
         reminder.Dispose();
         tray.Visible = false;
         tray.Dispose();

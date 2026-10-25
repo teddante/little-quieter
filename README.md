@@ -9,10 +9,14 @@ A Windows app that plays a steady alarm tone while you are too loud and stops wh
 Requires **Windows 11 x64** and the [**.NET 10 Desktop Runtime**](https://dotnet.microsoft.com/en-us/download/dotnet/10.0).
 
 1. Download and extract the ZIP from [Releases](https://github.com/teddante/little-quieter/releases/latest).
-2. Run `Install.ps1` in PowerShell. It installs for your account, adds a Start menu shortcut and enables automatic startup on first install. Updates preserve your settings and startup choice. You can also run the EXE directly.
-3. Choose your microphone and click **Learn my normal voice**. Adjust **Loudness limit** as needed: lower warns sooner.
+2. Double-click **Little Quieter Setup.exe**. It installs for your account, adds a Start menu shortcut and registers removal in Windows **Settings → Apps → Installed apps**. Updates preserve your settings and startup choice. `Install.ps1` remains available for command-line use.
+3. New installations open visibly with listening paused and startup off. Choose your microphone, click **Learn my normal voice**, then **Start listening**. Adjust **Loudness limit** as needed: lower warns sooner. Enable startup when you want it.
 
 Minimize to keep listening; double-click the tray icon to reopen. Closing the window exits. Use the startup checkbox to control automatic listening after sign-in.
+
+The window resizes and uses the Windows light/dark colour mode selected when the app starts. Standard controls support high-contrast colours and keyboard navigation. The live meter exposes its value to assistive technology. **Show visual reminder** controls the separate reminder window; it does not stay on top or steal focus. Use its Dismiss button, Escape, or the tray menu to dismiss it.
+
+Explicit microphone selections use endpoint IDs. A disconnected microphone stays selected as unavailable; the app pauses instead of opening another microphone. Old name-only selections migrate when their names match exactly one device.
 
 For automatic hours, choose **From** and **to**, then enable **Listen on a daily schedule**. It is off by default. Times use your PC's local clock and repeat every day; overnight ranges such as 22:00–07:00 work. Outside those hours, the microphone and alarm streams close. Equal start/end times keep listening off until you choose different times. Keep the app running in the tray; it does not wake a sleeping PC. **Stop listening** pauses the current scheduled period; the next period resumes automatically, or you can start listening again yourself.
 
@@ -24,7 +28,9 @@ The meter is relative microphone input, not calibrated room decibels. Other voic
 
 Settings: `%LOCALAPPDATA%\LittleQuieter\settings.xml`. Installation: `%LOCALAPPDATA%\Programs\LittleQuieter`.
 
-To uninstall, disable startup, exit, and delete the installed folder and Start menu shortcut. Settings can be removed separately. `Install.ps1 -WhatIf` previews installation without making changes.
+If settings cannot be read, the app pauses and preserves the original file. Repair it and restart, or choose **Back up and use new settings** to keep an exact backup before replacing it. Recovery starts with sound off.
+
+To uninstall, use Windows **Settings → Apps → Installed apps → Little Quieter → Uninstall**. The local removal script closes only this app, removes its files, shortcut and registration, and keeps personal settings. It uses Windows PowerShell without changing execution policy. `Install.ps1 -WhatIf` previews installation without making changes.
 
 ## Build
 

@@ -12,11 +12,15 @@ Use Windows 11 x64 and the .NET SDK selected by `global.json`. Open `LittleQuiet
 .\Check.ps1
 dotnet format --no-restore --verify-no-changes --severity warn
 .\Check.ps1 -Audio    # Silent hardware check at zero volume
-.\Check.ps1 -Running  # Installed app must be listening with startup enabled
+.\Check.ps1 -Running  # Verify installed app, scheduled streams and startup
 .\Package.ps1         # Build, check and package
 ```
 
-The ordinary checks cover signal processing, settings, daily scheduling, a hidden paused window and an isolated installer with temporary files and simulated registry/shortcuts. They do not open audio streams or change the installed app. `Check.ps1 -Audio` additionally exercises scheduled stream opening/closing at zero test volume. Installation from the repository uses `work/publish/`; run `Build.ps1` first.
+The ordinary checks cover signal processing, settings recovery, microphone identity, daily scheduling, a hidden paused window, native installer copies, temporary COM shortcuts and an isolated per-user test registry key. Wrapper/removal checks simulate live registry operations. They do not open audio streams or change the installed app. `Check.ps1 -Audio` additionally exercises scheduled stream opening/closing at zero test volume. Installation from the repository uses `work/publish/`; run `Build.ps1` first. Installation never rewrites Run or StartupApproved registration.
+
+`Package.ps1` includes a native **Little Quieter Setup.exe**, using the app's `--install` entry point. Installation stages and verifies the executable before replacement and keeps the previous EXE for rollback. Trusted publisher signing still requires an externally supplied code-signing certificate; do not generate or trust a self-signed certificate as a substitute.
+
+For an off-screen UI render without opening audio, run `dotnet run --project checks/Checks.csproj -c Release -- --preview work/window.png`. Add `--dark` to render dark mode in that process only.
 
 `DailySchedule` uses local calendar time for daily periods, including overnight ranges. Each active period is identified by its start date/time, so sleeping through an inactive period still resumes the next day. It issues one transition per period or configuration change; manual pauses and failures are not retried every UI tick. Audio processing and the stale-input watchdog retain their monotonic clock.
 

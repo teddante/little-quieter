@@ -6,41 +6,35 @@ internal sealed class ReminderWindow : Form
     public ReminderWindow()
     {
         Text = "Little Quieter reminder";
-        FormBorderStyle = FormBorderStyle.None;
-        ShowInTaskbar = false;
-        TopMost = true;
-        BackColor = Color.FromArgb(55, 35, 23);
-        ForeColor = Color.White;
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = MinimizeBox = false;
+        ShowInTaskbar = true;
+        StartPosition = FormStartPosition.Manual;
         AutoScaleDimensions = new SizeF(96, 96);
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(440, 156);
-        Font = new Font("Segoe UI", 11);
-        var heading = new Label { Text = "A LITTLE QUIETER", ForeColor = MainWindow.Amber, Location = new Point(20, 17), Size = new Size(355, 24), Font = new Font("Segoe UI", 11, FontStyle.Bold) };
-        message = new Label { Location = new Point(20, 51), Size = new Size(400, 83), Font = new Font("Segoe UI", 15, FontStyle.Bold) };
-        var dismiss = new Button { Text = "×", Location = new Point(396, 7), Size = new Size(35, 32), FlatStyle = FlatStyle.Flat, ForeColor = Color.White, TabStop = false, AccessibleName = "Dismiss reminder" };
-        dismiss.FlatAppearance.BorderSize = 0;
-        dismiss.Click += delegate
-        {
-            Hide();
-        };
-        Controls.AddRange(new Control[] { heading, message, dismiss });
-        MainWindow.ApplyContrast(this);
+        Font = SystemFonts.MessageBoxFont;
+        ClientSize = new Size(380, 150);
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(16) };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        message = new Label { AutoSize = true, Dock = DockStyle.Fill, Font = new Font(Font, FontStyle.Bold) };
+        var dismiss = new Button { Text = "&Dismiss", AutoSize = true, Anchor = AnchorStyles.Right, AccessibleName = "Dismiss reminder", DialogResult = DialogResult.Cancel };
+        dismiss.Click += (_, _) => Hide();
+        CancelButton = dismiss;
+        AcceptButton = dismiss;
+        layout.Controls.Add(message, 0, 0);
+        layout.Controls.Add(dismiss, 0, 1);
+        Controls.Add(layout);
+        FormClosing += (_, e) => { e.Cancel = true; Hide(); };
     }
+    // Avoid stealing focus, while remaining reachable through the taskbar and Alt+Tab.
     protected override bool ShowWithoutActivation => true;
-    protected override CreateParams CreateParams
-    {
-        get
-        {
-            var p = base.CreateParams;
-            p.ExStyle |= 0x08000000 | 0x80;
-            return p;
-        } // NOACTIVATE, TOOLWINDOW
-    }
     public void Remind(Form parent, string text)
     {
         message.Text = text;
         Rectangle area = Screen.FromControl(parent).WorkingArea;
-        Location = new Point(area.Right - Width - 24, area.Top + 24);
+        Location = new Point(Math.Max(area.Left, area.Right - Width - 24), area.Top + 24);
         Show();
     }
 }

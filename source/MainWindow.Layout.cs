@@ -2,24 +2,17 @@ namespace LittleQuieter;
 
 internal sealed partial class MainWindow
 {
-    internal static readonly Color Mint = Color.FromArgb(106, 226, 183);
-    internal static readonly Color Amber = Color.FromArgb(255, 184, 104);
-    private static readonly Color Ink = Color.FromArgb(16, 23, 31);
-    private static readonly Color Card = Color.FromArgb(26, 37, 49);
-    private static readonly Color Muted = Color.FromArgb(166, 184, 201);
     private readonly ComboBox microphones, outputs;
     private readonly TrackBar limit;
     private readonly Label limitCaption, stateCaption, levelCaption, liveCaption, footer;
     private readonly LevelMeter meter;
     private readonly Button start, learn, refresh, test;
     private readonly NumericUpDown toneVolume;
-    private readonly CheckBox playTone, runAtStartup;
-    private readonly CheckBox scheduleEnabled;
+    private readonly CheckBox playTone, runAtStartup, showReminder, scheduleEnabled;
     private readonly DateTimePicker scheduleStart, scheduleEnd;
     private readonly Label scheduleCaption;
     private readonly NotifyIcon tray;
-    private readonly ToolStripMenuItem trayToggle;
-    private readonly ToolStripMenuItem trayTest;
+    private readonly ToolStripMenuItem trayToggle, trayTest;
     private readonly System.Windows.Forms.Timer timer;
 
     public MainWindow(bool startInBackground, EventWaitHandle show, EventWaitHandle exit, string? preferencesPath = null)
@@ -31,153 +24,163 @@ internal sealed partial class MainWindow
         watchdog = new System.Threading.Timer(_ => gate.Refresh(AudioClock.Now), null, Timeout.Infinite, Timeout.Infinite);
         settingsPath = preferencesPath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LittleQuieter", "settings.xml");
         preferences = Preferences.Load(settingsPath);
+        showRequested = preferences.IsNew || preferences.NeedsRecovery;
         Text = "Little Quieter";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-        Font = new Font("Segoe UI", 10);
-        BackColor = Ink;
-        ForeColor = Color.White;
+        Font = SystemFonts.MessageBoxFont;
         AutoScaleDimensions = new SizeF(96, 96);
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(650, 832);
-        AutoScroll = true;
-        AutoScrollMinSize = ClientSize;
-        FormBorderStyle = FormBorderStyle.FixedSingle;
-        MaximizeBox = false;
+        ClientSize = new Size(650, 800);
+        MinimumSize = new Size(400, 400);
         StartPosition = FormStartPosition.CenterScreen;
-        Controls.Add(Label("Little Quieter", 24, 20, 600, 43, 28, Color.White, true));
-        Controls.Add(Label("Keep your voice within your chosen limit.", 26, 68, 600, 25, 11, Muted));
-        var card = new Panel { BackColor = Card, Location = new Point(24, 110), Size = new Size(602, 156) };
-        stateCaption = Label("PAUSED · MICROPHONE OFF", 20, 13, 563, 23, 10, Muted, true);
-        levelCaption = Label("—", 18, 39, 85, 56, 32, Color.White, true);
-        liveCaption = Label("Start listening to see your microphone level.", 112, 48, 470, 46, 11, Muted);
-        meter = new LevelMeter { Location = new Point(20, 112), Size = new Size(562, 23), BackColor = Card, Limit = preferences.Limit };
-        card.Controls.AddRange(new Control[] { stateCaption, levelCaption, liveCaption, meter });
-        Controls.Add(card);
-        Controls.Add(Label("MICROPHONE", 24, 284, 270, 22, 9, Muted, true));
-        Controls.Add(Label("ALARM OUTPUT", 310, 284, 230, 22, 9, Muted, true));
-        microphones = new ComboBox { Location = new Point(24, 309), Size = new Size(272, 29), DropDownWidth = 550, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Card, ForeColor = Color.White, AccessibleName = "Microphone" };
-        outputs = new ComboBox { Location = new Point(310, 309), Size = new Size(230, 29), DropDownWidth = 550, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Card, ForeColor = Color.White, AccessibleName = "Alarm output. Only changes Little Quieter" };
-        refresh = Button("Refresh", 550, 308, 76, 31);
+        var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(20) };
+        var content = Column();
+        scroll.Controls.Add(content);
+        Controls.Add(scroll);
+        AddRow(content, Caption("Little Quieter", true, 1.8f));
+        AddRow(content, Caption("Keep your voice within your chosen limit."));
+        var recovery = Column();
+        recovery.Visible = preferences.NeedsRecovery;
+        AddRow(recovery, Caption("Your settings could not be read. Listening is paused and the original file is preserved. Repair settings.xml and restart, or back it up and use new settings."));
+        var recover = ActionButton("Back up and use new settings");
+        recover.Click += (_, _) => RecoverPreferences(recovery);
+        AddRow(recovery, recover);
+        AddRow(content, recovery);
+        var card = Column();
+        card.Padding = new Padding(12);
+        card.BorderStyle = BorderStyle.FixedSingle;
+        stateCaption = Caption("PAUSED · MICROPHONE OFF", true);
+        levelCaption = Caption("—", true, 2);
+        liveCaption = Caption("Start listening to see your microphone level.");
+        meter = new LevelMeter { Dock = DockStyle.Top, Height = 24, Limit = preferences.Limit };
+        AddRow(card, stateCaption);
+        AddRow(card, levelCaption);
+        AddRow(card, liveCaption);
+        AddRow(card, meter);
+        AddRow(content, card);
+        AddRow(content, Caption("Microphone", true));
+        microphones = DevicePicker("Microphone");
+        AddRow(content, microphones);
+        AddRow(content, Caption("Alarm output (only Little Quieter)", true));
+        outputs = DevicePicker("Alarm output. Only changes Little Quieter");
+        AddRow(content, outputs);
+        refresh = ActionButton("&Refresh devices");
         refresh.Click += (_, _) => LoadDevices();
-        Controls.AddRange(new Control[] { microphones, outputs, refresh });
-        limitCaption = Label("", 24, 358, 600, 26, 11, Color.White, true);
-        Controls.Add(limitCaption);
-        limit = new TrackBar { Location = new Point(18, 388), Size = new Size(615, 36), AutoSize = false, Minimum = Levels.MinimumLimit, Maximum = Levels.MaximumLimit, Value = preferences.Limit, TickStyle = TickStyle.None, SmallChange = 1, LargeChange = 5, AccessibleName = "Loudness limit. Lower warns sooner" };
-        Controls.Add(limit);
-        Controls.Add(Label("Lower = warns sooner. Higher = allows a louder voice.", 24, 426, 600, 23, 10, Muted));
-        start = Button("Start listening", 24, 468, 176, 43, true);
+        AddRow(content, refresh);
+        limitCaption = Caption("", true);
+        AddRow(content, limitCaption);
+        limit = new TrackBar { Dock = DockStyle.Top, Minimum = Levels.MinimumLimit, Maximum = Levels.MaximumLimit, Value = preferences.Limit, TickStyle = TickStyle.None, SmallChange = 1, LargeChange = 5, AccessibleName = "Loudness limit. Lower warns sooner" };
+        AddRow(content, limit);
+        AddRow(content, Caption("Lower warns sooner. Higher allows a louder voice."));
+        start = ActionButton("Start listening");
         start.Click += (_, _) => ToggleListening();
-        learn = Button("Learn my normal voice", 212, 468, 238, 43);
+        learn = ActionButton("Learn my normal voice");
         learn.Click += (_, _) => ToggleCalibration();
-        test = Button("Test tone (2s)", 462, 468, 164, 43);
+        test = ActionButton("Test tone (2s)");
         test.Click += (_, _) => PreviewAlarm();
-        Controls.AddRange(new Control[] { start, learn, test });
-        playTone = new CheckBox { Text = "Play steady alarm tone", Location = new Point(24, 534), Size = new Size(274, 27), Checked = preferences.PlayTone, AccessibleName = "Play steady alarm tone" };
-        Controls.Add(playTone);
-        Controls.Add(Label("Alarm volume", 362, 537, 113, 24, 10, Muted));
-        toneVolume = new NumericUpDown { Location = new Point(476, 534), Size = new Size(70, 29), Minimum = 0, Maximum = 100, Value = preferences.ToneVolume, Increment = 5, BackColor = Card, ForeColor = Color.White, AccessibleName = "Alarm tone volume percent" };
-        Controls.Add(toneVolume);
-        Controls.Add(Label("%", 554, 537, 45, 24, 10, Muted));
-        runAtStartup = new CheckBox { Text = "Start with Windows and listen in the background", Location = new Point(24, 578), Size = new Size(602, 27), AccessibleName = "Start with Windows and listen in the background" };
+        AddRow(content, Actions(start, learn, test));
+        playTone = Option("Play steady alarm tone", preferences.PlayTone);
+        showReminder = Option("Show visual reminder", preferences.ShowReminder);
+        AddRow(content, playTone);
+        AddRow(content, showReminder);
+        toneVolume = new NumericUpDown { Width = 80, Minimum = 0, Maximum = 100, Value = preferences.ToneVolume, Increment = 5, AccessibleName = "Alarm tone volume percent" };
+        AddRow(content, Actions(Caption("Alarm volume (%)"), toneVolume));
+        runAtStartup = Option("Start with Windows and listen in the background", false);
         try
         {
             runAtStartup.Checked = StartupRegistration.Enabled;
         }
         catch (System.Security.SecurityException) { }
-        Controls.Add(runAtStartup);
-        scheduleEnabled = new CheckBox { Text = "Listen on a daily schedule", Location = new Point(24, 620), Size = new Size(602, 27), Checked = preferences.ScheduleEnabled, AccessibleName = "Listen on a daily schedule" };
-        scheduleStart = TimePicker("Daily start time", 75, preferences.ScheduleStartMinute);
-        scheduleEnd = TimePicker("Daily end time", 220, preferences.ScheduleEndMinute);
-        Controls.Add(Label("From", 24, 663, 47, 24, 10, Muted));
-        Controls.Add(Label("to", 184, 663, 30, 24, 10, Muted));
-        Controls.Add(Label("Local time · every day\nOvernight ranges supported", 327, 658, 299, 42, 9, Muted));
-        scheduleCaption = Label("", 24, 701, 602, 38, 10, Muted);
-        Controls.AddRange(new Control[] { scheduleEnabled, scheduleStart, scheduleEnd, scheduleCaption });
-        footer = Label("Tone starts above your limit and stops when you quieten down.", 24, 744, 602, 38, 10, Muted);
-        Controls.Add(footer);
-        Controls.Add(Label("Local only · no recordings · hears other room sounds too\nMinimize to keep listening in the tray. Close × exits and turns the mic off.", 24, 786, 602, 42, 9, Muted));
+        AddRow(content, runAtStartup);
+        scheduleEnabled = Option("Listen on a daily schedule", preferences.ScheduleEnabled);
+        scheduleStart = TimePicker("Daily start time", preferences.ScheduleStartMinute);
+        scheduleEnd = TimePicker("Daily end time", preferences.ScheduleEndMinute);
+        AddRow(content, scheduleEnabled);
+        AddRow(content, Actions(Caption("From"), scheduleStart, Caption("to"), scheduleEnd));
+        AddRow(content, Caption("Local time · every day · overnight ranges supported"));
+        scheduleCaption = Caption("");
+        AddRow(content, scheduleCaption);
+        footer = Caption(preferences.IsNew ? "Choose your microphone, learn your voice, then start listening. Startup is your choice." : "Tone starts above your limit and stops when you quieten down.");
+        AddRow(content, footer);
+        AddRow(content, Caption("Local only · no recordings · hears other room sounds too\nMinimize to keep listening in the tray. Close × exits and turns the mic off."));
         runAtStartup.CheckedChanged += (_, _) => ChangeStartup();
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open Little Quieter", null, (_, _) => RestoreWindow());
         trayToggle = new ToolStripMenuItem("Start listening", null, (_, _) => ToggleListening());
         menu.Items.Add(trayToggle);
         trayTest = (ToolStripMenuItem)menu.Items.Add("Test tone (2s)", null, (_, _) => PreviewAlarm());
+        menu.Items.Add("Dismiss reminder", null, (_, _) => reminder.Hide());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => Close());
         tray = new NotifyIcon { Text = "Little Quieter — paused", Icon = Icon, ContextMenuStrip = menu, Visible = true };
         tray.DoubleClick += (_, _) => RestoreWindow();
-        Resize += (_, _) =>
-        {
-            if (WindowState == FormWindowState.Minimized)
-                Hide();
-        };
+        Resize += (_, _) => { if (WindowState == FormWindowState.Minimized) Hide(); };
         FormClosing += (_, _) => Shutdown();
         Shown += (_, _) =>
         {
             Rectangle area = Screen.FromControl(this).WorkingArea;
-            if (Height > area.Height - 24)
-            {
-                Height = area.Height - 24;
-                Top = area.Top + 12;
-            }
+            Size = new Size(Math.Min(Width, area.Width - 24), Math.Min(Height, area.Height - 24));
+            Location = new Point(Math.Clamp(Left, area.Left, Math.Max(area.Left, area.Right - Width)), Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - Height)));
         };
         timer = new System.Windows.Forms.Timer { Interval = 100 };
         timer.Tick += (_, _) => TickMonitor();
         timer.Start();
         LoadDevices();
         UpdateLimit();
-        ApplyContrast(this);
-        limit.ValueChanged += (_, _) =>
+        limit.ValueChanged += (_, _) => { UpdateLimit(); ConfigureGate(); QueueSave(); };
+        playTone.CheckedChanged += (_, _) => { ConfigureGate(); QueueSave(); };
+        showReminder.CheckedChanged += (_, _) =>
         {
-            UpdateLimit();
-            ConfigureGate();
+            previousActive = previousPreview = false;
+            UpdateReminder(gate.Active, gate.IsPreviewing(AudioClock.Now));
             QueueSave();
         };
-        playTone.CheckedChanged += (_, _) =>
-        {
-            ConfigureGate();
-            QueueSave();
-        };
-        toneVolume.ValueChanged += (_, _) =>
-        {
-            alarm.SetVolume((int)toneVolume.Value);
-            ConfigureGate();
-            QueueSave();
-        };
+        toneVolume.ValueChanged += (_, _) => { alarm.SetVolume((int)toneVolume.Value); ConfigureGate(); QueueSave(); };
         microphones.SelectedIndexChanged += (_, _) => QueueSave();
         outputs.SelectedIndexChanged += (_, _) => QueueSave();
         scheduleEnabled.CheckedChanged += (_, _) => ChangeSchedule();
         scheduleStart.ValueChanged += (_, _) => ChangeSchedule();
         scheduleEnd.ValueChanged += (_, _) => ChangeSchedule();
         ConfigureGate();
+        if (preferences.NeedsRecovery)
+            SetSettingsEnabled(false);
         UpdateScheduleControls(DateTime.Now);
-        SavePreferences(false); // Migrate away from obsolete speech/delay fields once at startup.
+        SavePreferences(false);
     }
     protected override void SetVisibleCore(bool value)
     {
         base.SetVisibleCore(value && (!background || showRequested));
     }
-    internal static void ApplyContrast(Control control)
+    private static TableLayoutPanel Column()
     {
-        if (!SystemInformation.HighContrast)
-            return;
-        control.BackColor = SystemColors.Window;
-        control.ForeColor = SystemColors.WindowText;
-        foreach (Control child in control.Controls)
-            ApplyContrast(child);
+        var column = new TableLayoutPanel { ColumnCount = 1, RowCount = 0, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Top, Margin = new Padding(0, 4, 0, 4) };
+        column.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        column.SizeChanged += (_, _) =>
+        {
+            foreach (Control child in column.Controls)
+                if (child is Label or CheckBox)
+                    child.MaximumSize = new Size(Math.Max(100, column.ClientSize.Width - column.Padding.Horizontal - child.Margin.Horizontal), 0);
+        };
+        return column;
     }
-    private static Label Label(string text, int x, int y, int w, int h, float size, Color color, bool bold = false)
+    private static void AddRow(TableLayoutPanel column, Control control)
     {
-        return new Label { Text = text, Location = new Point(x, y), Size = new Size(w, h), Font = new Font("Segoe UI", size, bold ? FontStyle.Bold : FontStyle.Regular), ForeColor = color };
+        int row = column.RowCount++;
+        column.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        column.Controls.Add(control, 0, row);
     }
-    private static Button Button(string text, int x, int y, int w, int h, bool primary = false)
+    private Label Caption(string text, bool bold = false, float scale = 1)
     {
-        var button = new Button { Text = text, Location = new Point(x, y), Size = new Size(w, h), FlatStyle = FlatStyle.Flat, BackColor = primary ? Mint : Card, ForeColor = primary ? Ink : Color.White, Font = new Font("Segoe UI", 10, FontStyle.Bold), Cursor = Cursors.Hand, UseVisualStyleBackColor = false };
-        button.FlatAppearance.BorderSize = 0;
-        return button;
+        return new Label { Text = text, AutoSize = true, Dock = DockStyle.Top, Margin = new Padding(0, 5, 0, 5), Font = new Font(Font.FontFamily, Font.Size * scale, bold ? FontStyle.Bold : FontStyle.Regular) };
     }
-    private static DateTimePicker TimePicker(string name, int x, int minute)
+    private static Button ActionButton(string text) => new Button { Text = text, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 4, 8, 4) };
+    private static CheckBox Option(string text, bool value) => new CheckBox { Text = text, AutoSize = true, Checked = value, AccessibleName = text, Margin = new Padding(0, 5, 0, 5) };
+    private static ComboBox DevicePicker(string name) => new ComboBox { Dock = DockStyle.Top, DropDownWidth = 550, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = name };
+    private static FlowLayoutPanel Actions(params Control[] controls)
     {
-        return new DateTimePicker { Location = new Point(x, 660), Size = new Size(93, 29), Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true, Value = DateTime.Today.AddMinutes(minute), AccessibleName = name };
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Margin = Padding.Empty };
+        flow.Controls.AddRange(controls);
+        return flow;
     }
+    private static DateTimePicker TimePicker(string name, int minute) => new DateTimePicker { Width = 100, Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm", ShowUpDown = true, Value = DateTime.Today.AddMinutes(minute), AccessibleName = name };
 }

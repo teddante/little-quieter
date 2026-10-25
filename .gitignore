@@ -1,0 +1,18 @@
+# Build output and local diagnostics
+/work/
+/measurement-data/
+*.exe
+*.dll
+*.pdb
+*.zip
+**/bin/
+**/obj/
+
+# Editor and user settings
+.vs/
+.idea/
+*.user
+*.suo
+settings.xml
+.env
+.env.*

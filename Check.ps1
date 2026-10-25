@@ -1,4 +1,8 @@
-param([switch]$Audio, [switch]$Running)
+[CmdletBinding(DefaultParameterSetName = 'Ordinary')]
+param(
+    [Parameter(ParameterSetName = 'Audio')][switch]$Audio,
+    [Parameter(ParameterSetName = 'Running')][switch]$Running
+)
 $ErrorActionPreference = 'Stop'
 $projectPath = Join-Path $PSScriptRoot 'source\Checks.csproj'
 & dotnet restore $projectPath --locked-mode --verbosity quiet

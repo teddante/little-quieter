@@ -9,12 +9,19 @@ namespace LittleQuieter
         private BiQuadFilter first;
         private BiQuadFilter second;
         private readonly int rate;
-        public AlarmRejectionFilter(int sampleRate = 48000) { rate = sampleRate; Reset(); }
+        public AlarmRejectionFilter(int sampleRate = 48000)
+        {
+            rate = sampleRate;
+            Reset();
+        }
         public void Reset()
         {
             first = BiQuadFilter.NotchFilter(rate, AlarmTone.FrequencyHz, 8);
             second = BiQuadFilter.NotchFilter(rate, AlarmTone.FrequencyHz, 8);
         }
-        public float Transform(float sample) { return second.Transform(first.Transform(sample)); }
+        public float Transform(float sample)
+        {
+            return second.Transform(first.Transform(sample));
+        }
     }
 }

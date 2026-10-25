@@ -1,9 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $projectPath = Join-Path $PSScriptRoot 'source\LittleQuieter.csproj'
 $publishFolder = Join-Path $PSScriptRoot 'work\publish'
-$restoreArgs = @('restore', $projectPath, '--runtime', 'win-x64', '--verbosity', 'quiet')
-if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'source\packages.lock.json')) { $restoreArgs += '--locked-mode' }
-& dotnet @restoreArgs
+& dotnet restore $projectPath --runtime win-x64 --locked-mode --verbosity quiet
 if ($LASTEXITCODE -ne 0) { throw 'Package restore failed.' }
 & dotnet publish $projectPath --configuration Release --runtime win-x64 --self-contained false --no-restore -p:PublishSingleFile=true --output $publishFolder --verbosity quiet
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }

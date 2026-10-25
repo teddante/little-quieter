@@ -1,3 +1,4 @@
+[CmdletBinding(SupportsShouldProcess)]
 param([switch]$NoLaunch)
 $ErrorActionPreference = 'Stop'
 $sourceProgram = Join-Path $PSScriptRoot 'Little Quieter.exe'
@@ -8,6 +9,7 @@ $runtimeList = & dotnet --list-runtimes
 if ($LASTEXITCODE -ne 0 -or !($runtimeList -match '^Microsoft.WindowsDesktop.App 10\.')) {
     throw 'Install the x64 .NET 10 Windows Desktop runtime before installing Little Quieter.'
 }
+if (!$PSCmdlet.ShouldProcess($installedProgram, 'Install Little Quieter, enable startup and create a Start menu shortcut')) { return }
 
 # Ask only this app's installed process to exit before replacing its executable.
 $running = @(Get-Process -Name 'Little Quieter' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $installedProgram })
@@ -19,6 +21,7 @@ if ($running.Count -gt 0) {
 }
 [IO.Directory]::CreateDirectory($installFolder) | Out-Null
 Copy-Item -LiteralPath $sourceProgram -Destination $installedProgram -Force
+if ((Get-FileHash -LiteralPath $sourceProgram).Hash -ne (Get-FileHash -LiteralPath $installedProgram).Hash) { throw 'The installed copy did not match the build.' }
 $notices = Join-Path $PSScriptRoot 'THIRD-PARTY-NOTICES.txt'
 if (Test-Path -LiteralPath $notices) { Copy-Item -LiteralPath $notices -Destination $installFolder -Force }
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
@@ -31,8 +34,6 @@ $shortcut.TargetPath = $installedProgram
 $shortcut.WorkingDirectory = $installFolder
 $shortcut.Description = 'Open Little Quieter microphone volume monitor'
 $shortcut.Save()
-if (!(Test-Path -LiteralPath $installedProgram)) { throw 'The installed executable is missing.' }
-if ((Get-FileHash -LiteralPath $sourceProgram).Hash -ne (Get-FileHash -LiteralPath $installedProgram).Hash) { throw 'The installed copy did not match the build.' }
 if (!$NoLaunch) { Start-Process -FilePath $installedProgram -ArgumentList '--background' -WindowStyle Hidden }
 Write-Output "Installed: $installedProgram"
 Write-Output 'Starts listening in the system tray when you sign into Windows.'

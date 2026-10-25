@@ -14,7 +14,7 @@ A small Windows microphone monitor that plays a steady alarm tone while you are 
 
 Requires **Windows 11 x64** and the **x64 .NET 10 Windows Desktop Runtime**. Install the Desktop Runtime from [Microsoft's .NET 10 download page](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) if it is missing. Building requires the SDK instead.
 
-1. Download `LittleQuieter-1.3.1-win-x64.zip` from the [latest release](https://github.com/teddante/little-quieter/releases/latest).
+1. Download the `LittleQuieter-<version>-win-x64.zip` file from the [latest published release](https://github.com/teddante/little-quieter/releases/latest). The source branch may contain changes awaiting release.
 2. Extract the ZIP, then open `Little Quieter.exe`.
 3. Choose your microphone and click **Learn my normal voice**. After two seconds of preparation, speak at a comfortable indoor volume for eight seconds.
 4. Adjust **Loudness limit** if needed: lower warns sooner; higher allows more volume.
@@ -40,6 +40,8 @@ The installation folder is `%LOCALAPPDATA%\Programs\LittleQuieter`. Settings are
 
 To remove the app, disable its startup checkbox, exit it, and delete its installation folder and Start menu shortcut. You can delete its settings folder separately.
 
+`Install.ps1 -WhatIf` previews the installation without stopping the app or changing files, startup or shortcuts.
+
 ## Audio routing and limitations
 
 **Alarm output** changes only this app's output. New installations use **Windows default output**. To choose a physical output directly, stop listening, select the device, then start listening again. Windows defaults and other applications' routing are not changed. An unavailable explicitly selected output produces an error rather than redirecting the alarm to another speaker.
@@ -61,6 +63,14 @@ Clone this repository on Windows with the **.NET 10 SDK** installed, then run:
 
 `Build.ps1` creates `Little Quieter.exe` in the repository root. Intermediate outputs stay in the ignored `work/` folder. NuGet restores use the committed dependency lock files. GitHub Actions builds the app and runs the same ordinary checks without opening audio devices.
 
+To build, run the ordinary checks and create the release ZIP and SHA-256 checksum in one step:
+
+```powershell
+.\Package.ps1
+```
+
+Packages are written to `work/packages/`. The package version comes from the application project. A fixed file list excludes settings, diagnostic reports and build intermediates. GitHub Actions uses this same packaging command and checks source formatting.
+
 Optional local checks:
 
 ```powershell
@@ -75,3 +85,5 @@ The ordinary checks exercise callback gating, the stale-input watchdog, signal r
 C# / .NET 10 Windows Forms, with shared, event-driven WASAPI through pinned [NAudio 3.3.0](https://github.com/naudio/NAudio/releases/tag/v3.3.0). A prepared output stream emits silence between alarms; a gate changes its signal without reopening the device. UI summaries are throttled separately from the audio decision.
 
 See [Windows implementation review](WINDOWS-REVIEW.md) for design details and validation limits. Dependency licences are in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt). No open-source licence has been selected for the original project code.
+
+See [contributor guidance](CONTRIBUTING.md) for the source layout, formatting commands and validation expectations.

@@ -1,6 +1,6 @@
 # Measured latency and PC impact
 
-Measured on one development PC on 25 October 2026. All tests were silent and used APIs/command-line tools, with no computer use. These are machine-specific observations, not performance guarantees for other systems. Device identifiers and private diagnostic files are not published.
+Historical measurements of **version 1.3.1** on one development PC on 25 October 2026. All tests were silent and used APIs/command-line tools, with no computer use. These are machine-specific observations, not performance guarantees for other systems. Device identifiers and private diagnostic files are not published.
 
 ## Timing results
 
@@ -42,8 +42,8 @@ No actual game/FPS test, prolonged load test or acoustic latency test was perfor
 
 ## Verification and rollback
 
-Release build and all 39 focused checks passed, followed by silent native audio and installed-session checks. The installed executable matches the delivered build. Existing limit/volume and startup were retained.
+For version 1.3.1, the Release build and all 39 focused checks passed, followed by silent native audio and installed-session checks. At that point the installed executable matched the delivered build, and existing limit/volume and startup were retained. Subsequent source refactoring does not update that installation or establish new performance measurements.
 
 To use the system default alarm route: open Little Quieter, stop listening, select **Windows default output** under **Alarm output**, then start listening again. This changes only Little Quieter. A missing explicitly selected endpoint does not silently redirect a loud alarm to another speaker.
 
-Raw timing/resource metadata was retained locally, with no recorded microphone audio. It is excluded from the public repository because it contains machine-specific diagnostics. The source includes diagnostic commands through `Checks.csproj`, using `--clock-benchmark`, `--capture-timing` and `--benchmark` for the retained loopback attempt.
+Raw timing/resource metadata was retained locally, with no recorded microphone audio. It is excluded from the public repository because it contains machine-specific diagnostics. The supported source diagnostics are `--clock-benchmark` and `--capture-timing`; see [contributor guidance](CONTRIBUTING.md). The unsuccessful process-loopback command was removed during refactoring. Its failed result remains documented above.

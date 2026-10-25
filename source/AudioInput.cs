@@ -4,26 +4,6 @@ using NAudio.Wave;
 
 namespace LittleQuieter;
 
-internal sealed class AudioDevice
-{
-    public const string DefaultMicrophoneName = "Windows default microphone";
-    public const string DefaultOutputName = "Windows default output";
-    public string? Id;
-    public required string Name;
-    public override string ToString()
-    {
-        return Name;
-    }
-    public static List<AudioDevice> List(DataFlow flow)
-    {
-        var result = new List<AudioDevice> { new AudioDevice { Name = flow == DataFlow.Capture ? DefaultMicrophoneName : DefaultOutputName } };
-        using var enumerator = new MMDeviceEnumerator();
-        foreach (var device in enumerator.EnumerateAudioEndPoints(flow, DeviceState.Active))
-            using (device)
-                result.Add(new AudioDevice { Id = device.ID, Name = device.FriendlyName });
-        return result;
-    }
-}
 internal readonly record struct SoundFrame(double Db, double Time, bool Clipped);
 
 internal sealed class AudioInput : IDisposable
@@ -41,14 +21,11 @@ internal sealed class AudioInput : IDisposable
     public event Action<SoundFrame>? LevelAvailable;
     public event Action? StreamStopped;
     public Exception? Fault => fault;
-    public bool LowLatency => recorder != null && recorder.LowLatencyActive;
-    public int EngineMilliseconds => recorder == null ? 0 : recorder.LatencyMilliseconds;
+    public bool LowLatency => recorder?.LowLatencyActive == true;
+    public int EngineMilliseconds => recorder?.LatencyMilliseconds ?? 0;
     public WaveFormat? Format => recorder?.WaveFormat;
-    public double AnalysisMilliseconds => analyzer == null ? 0 : analyzer.WindowMilliseconds;
-    public bool TryRead(out SoundFrame frame)
-    {
-        return frames.TryDequeue(out frame);
-    }
+    public double AnalysisMilliseconds => analyzer?.WindowMilliseconds ?? 0;
+    public bool TryRead(out SoundFrame frame) => frames.TryDequeue(out frame);
     public void Start(string? deviceId)
     {
         if (recorder != null || disposed)

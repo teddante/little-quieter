@@ -6,10 +6,7 @@ namespace LittleQuieter;
 internal sealed class AlarmTone : IDisposable
 {
     private readonly Func<IWaveProvider, IWaveProvider>? measurementDecorator;
-    public AlarmTone()
-    {
-    }
-    internal AlarmTone(Func<IWaveProvider, IWaveProvider> decorator)
+    public AlarmTone(Func<IWaveProvider, IWaveProvider>? decorator = null)
     {
         measurementDecorator = decorator;
     }
@@ -20,10 +17,10 @@ internal sealed class AlarmTone : IDisposable
     private volatile Exception? fault;
     public Exception? Fault => fault;
     public const int FrequencyHz = 2500;
-    public bool IsReady => player != null && player.PlaybackState == PlaybackState.Playing;
-    public bool IsActive => source != null && source.Active;
-    public bool LowLatency => player != null && player.LowLatencyActive;
-    public int EngineMilliseconds => player == null ? 0 : player.LatencyMilliseconds;
+    public bool IsReady => player?.PlaybackState == PlaybackState.Playing;
+    public bool IsActive => source?.Active == true;
+    public bool LowLatency => player?.LowLatencyActive == true;
+    public int EngineMilliseconds => player?.LatencyMilliseconds ?? 0;
     public WaveFormat? Format => source?.WaveFormat;
     public void Start(int volume, string? deviceId = null)
     {

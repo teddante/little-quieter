@@ -242,9 +242,9 @@ internal static class Benchmarks
             };
             WriteReport(reportPath, report);
             Console.WriteLine("Session muted; native endpoint buffer=" + report.OutputBufferMs.ToString("F2") + " ms, engine=" + report.OutputReportedEngineMs + " ms; markers=" + matches.Count + "/" + commands.Count);
-            Console.WriteLine("Endpoint-clock start min/median/p95/max ms: " + String.Join(", ", Summary(starts).Select(x => x.ToString("F2"))));
-            Console.WriteLine("Endpoint-clock stop min/median/p95/max ms: " + String.Join(", ", Summary(stops).Select(x => x.ToString("F2"))));
-            Console.WriteLine("Source-generation start median ms: " + Summary(generatedStarts).ElementAtOrDefault(1).ToString("F2"));
+            Console.WriteLine("Endpoint-clock start min/median/p95/max ms: " + String.Join(", ", report.StartMinMedianP95MaxMs.Select(x => x.ToString("F2"))));
+            Console.WriteLine("Endpoint-clock stop min/median/p95/max ms: " + String.Join(", ", report.StopMinMedianP95MaxMs.Select(x => x.ToString("F2"))));
+            Console.WriteLine("Source-generation start median ms: " + report.StartGenerationMinMedianP95MaxMs.ElementAtOrDefault(1).ToString("F2"));
             if (matches.Count != commands.Count || starts.Any(x => x < -1) || stops.Any(x => x < -1))
                 throw new InvalidOperationException("Clock measurement incomplete or inconsistent; retain the data but do not claim valid timings.");
             return 0;

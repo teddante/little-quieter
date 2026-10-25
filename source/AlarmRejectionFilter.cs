@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using NAudio.Dsp;
 
 namespace LittleQuieter;
@@ -7,19 +6,16 @@ namespace LittleQuieter;
 // echo cannot normally hold the alarm on. Used during calibration as well.
 internal sealed class AlarmRejectionFilter
 {
-    private BiQuadFilter first;
-    private BiQuadFilter second;
-    private readonly int rate;
+    private readonly BiQuadFilter first, second;
     public AlarmRejectionFilter(int sampleRate = 48000)
     {
-        rate = sampleRate;
-        Reset();
+        first = BiQuadFilter.NotchFilter(sampleRate, AlarmTone.FrequencyHz, 8);
+        second = BiQuadFilter.NotchFilter(sampleRate, AlarmTone.FrequencyHz, 8);
     }
-    [MemberNotNull(nameof(first), nameof(second))]
     public void Reset()
     {
-        first = BiQuadFilter.NotchFilter(rate, AlarmTone.FrequencyHz, 8);
-        second = BiQuadFilter.NotchFilter(rate, AlarmTone.FrequencyHz, 8);
+        first.ResetState();
+        second.ResetState();
     }
     public float Transform(float sample)
     {

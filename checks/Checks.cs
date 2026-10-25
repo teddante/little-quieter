@@ -19,7 +19,11 @@ internal static class Checks
         try
         {
             if (args.Length > 0 && args[0] == "--audio")
-                return AudioCheck();
+            {
+                AudioCheck();
+                WindowChecks(CheckScheduledAudio);
+                return 0;
+            }
             if (args.Length > 0 && args[0] == "--running")
                 return RunningCheck();
             if (args.Length > 0 && args[0] == "--clock-benchmark")
@@ -34,6 +38,8 @@ internal static class Checks
             ToneChecks();
             AnalyzerChecks();
             SettingsChecks();
+            ScheduleChecks();
+            WindowChecks();
             Console.WriteLine("All " + count + " checks passed.");
             return 0;
         }
@@ -229,16 +235,18 @@ internal static class Checks
         byte[] outputBuffer = new byte[240 * allocationTone.WaveFormat.BlockAlign];
         for (int i = 0; i < 100; i++)
         {
+            allocationAnalyzer.Reset();
             allocationAnalyzer.Process(steadyInput, AudioClock.Now);
             allocationTone.Read(outputBuffer);
         }
         long allocated = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 1000; i++)
         {
+            allocationAnalyzer.Reset();
             allocationAnalyzer.Process(steadyInput, AudioClock.Now);
             allocationTone.Read(outputBuffer);
         }
-        Assert(GC.GetAllocatedBytesForCurrentThread() == allocated, "steady analysis, gating and tone generation allocate no managed memory");
+        Assert(GC.GetAllocatedBytesForCurrentThread() == allocated, "analysis, discontinuity resets, gating and tone generation allocate no managed memory");
     }
     private static void SettingsChecks()
     {
@@ -251,9 +259,14 @@ internal static class Checks
             File.WriteAllText(path, "<Preferences><Duration>0.5</Duration><Cooldown>20</Cooldown><Message>Old speech text</Message><Speak>true</Speak><Limit>50</Limit><ToneVolume>80</ToneVolume></Preferences>");
             var loaded = Preferences.Load(path);
             Assert(loaded.Limit == 50 && loaded.ToneVolume == 80, "old speech and delay fields are ignored while level and volume are preserved");
+            Assert(!loaded.ScheduleEnabled, "upgrading old preferences leaves automatic scheduling off");
             loaded.OutputDeviceId = "explicit-test-device";
             loaded.OutputDeviceName = "Test output";
+            loaded.ScheduleStartMinute = -1;
+            loaded.ScheduleEndMinute = 2000;
             loaded.Save(path);
+            Assert(Preferences.Load(path).ScheduleStartMinute == 0 && Preferences.Load(path).ScheduleEndMinute == 1439,
+                "invalid stored schedule minutes are bounded to a valid time of day");
             string saved = File.ReadAllText(path);
             Assert(!saved.Contains("Message") && !saved.Contains("Duration") && !saved.Contains("Speak") && !saved.Contains("Cooldown"), "saving removes obsolete speech, message, delay and cooldown data");
             loaded.Limit = 999;
@@ -276,6 +289,146 @@ internal static class Checks
             Assert(Preferences.Load(relativePath).Limit == 50, "settings can be saved to a filename in the current directory");
         }
         finally { File.Delete(relativePath); }
+    }
+    private static void ScheduleChecks()
+    {
+        DateTime day = new DateTime(2026, 12, 31);
+        Assert(DailySchedule.ActivePeriodStart(540, 1020, day.AddHours(9)) == day.AddHours(9) &&
+            DailySchedule.ActivePeriodStart(540, 1020, day.AddHours(17)) == null &&
+            DailySchedule.ActivePeriodStart(540, 1020, day.AddHours(9).AddTicks(-1)) == null,
+            "daytime schedule includes its start and excludes its end");
+        DateTime night = day.AddHours(22);
+        Assert(DailySchedule.ActivePeriodStart(1320, 420, night) == night &&
+            DailySchedule.ActivePeriodStart(1320, 420, day.AddDays(1).AddHours(6)) == night &&
+            DailySchedule.ActivePeriodStart(1320, 420, day.AddDays(1).AddHours(7)) == null,
+            "overnight schedule retains one active period across midnight and year boundaries");
+        Assert(DailySchedule.ActivePeriodStart(0, 0, day) == null &&
+            DailySchedule.ActivePeriodStart(-1, 420, day) == null &&
+            DailySchedule.ActivePeriodStart(0, 1440, day) == null,
+            "equal or invalid schedule times stay inactive");
+        var schedule = new DailySchedule();
+        Assert(schedule.Update(false, 540, 1020, day.AddHours(10)) == null, "disabled scheduling leaves manual listening alone");
+        Assert(schedule.Update(true, 540, 1020, day.AddHours(10)) == true &&
+            schedule.Update(true, 540, 1020, day.AddHours(11)) == null,
+            "schedule starts once per active period, preserving a manual pause or device failure");
+        Assert(schedule.Update(true, 540, 1020, day.AddHours(17)) == false &&
+            schedule.Update(true, 540, 1020, day.AddHours(18)) == null,
+            "schedule stops once when its active period ends");
+        Assert(schedule.Update(true, 540, 1020, day.AddDays(1).AddHours(10)) == true &&
+            schedule.Update(true, 540, 1020, day.AddDays(2).AddHours(10)) == true,
+            "a new daily period resumes listening even after sleeping through the inactive period");
+        Assert(schedule.Update(true, 540, 600, day.AddDays(2).AddHours(10)) == false,
+            "editing the end time can immediately close the active period");
+        schedule.Update(false, 540, 1020, day.AddDays(2).AddHours(10));
+        Assert(schedule.Update(true, 540, 1020, day.AddDays(2).AddHours(10)) == true,
+            "reenabling a schedule applies the current local time immediately");
+    }
+    private static void WindowChecks(Action? check = null)
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                if (check == null)
+                    CheckWindow();
+                else
+                    check();
+            }
+            catch (Exception error) { failure = error; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (failure != null)
+            throw new InvalidOperationException("Window checks failed.", failure);
+    }
+    private static void CheckWindow()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "LittleQuieter-window-check-" + Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(folder, "settings.xml");
+        const string deviceName = "Test output (unavailable)";
+        new Preferences { Limit = 50, PlayTone = false, ToneVolume = 0, OutputDeviceId = "missing-test-output", OutputDeviceName = deviceName }.Save(path);
+        try
+        {
+            using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var exit = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var window = new MainWindow(false, show, exit, path);
+            _ = window.Handle;
+            try
+            {
+                var output = window.Controls.OfType<ComboBox>().Single(control => control.AccessibleName == "Alarm output. Only changes Little Quieter");
+                Assert(output.SelectedItem is AudioDevice { Id: "missing-test-output", Name: deviceName, Unavailable: true },
+                    "window preserves a disconnected output instead of routing an alarm elsewhere");
+                var saved = Preferences.Load(path);
+                Assert(saved.Limit == 50 && !saved.PlayTone && saved.ToneVolume == 0 && saved.OutputDeviceName == deviceName,
+                    "window initialization preserves settings and literal device names");
+                output.SelectedIndex = 0;
+                window.LoadDevices();
+                Assert(output.SelectedItem is AudioDevice { Id: null }, "refresh retains an unsaved switch to Windows default output");
+                var pickers = window.Controls.OfType<DateTimePicker>().ToArray();
+                var enabled = window.Controls.OfType<CheckBox>().Single(control => control.AccessibleName == "Listen on a daily schedule");
+                Assert(!enabled.Checked && pickers.Length == 2 && pickers.All(picker => picker.Enabled && picker.CustomFormat == "HH:mm"),
+                    "scheduling defaults off and its hours can be chosen before enabling it");
+                pickers[0].Value = DateTime.Now.AddHours(1);
+                pickers[1].Value = DateTime.Now.AddHours(2);
+                enabled.Checked = true;
+                Assert(!window.IsListening && !window.Controls.OfType<Button>().Single(button => button.Text == "Learn my normal voice").Enabled,
+                    "outside scheduled hours the window stays paused with calibration disabled");
+                pickers[1].Value = pickers[0].Value;
+                Assert(!window.IsListening && window.Controls.OfType<Label>().Any(label => label.Text.StartsWith("Choose different start")),
+                    "equal schedule times clearly explain why listening stays off");
+            }
+            finally { window.Close(); }
+            Assert(Preferences.Load(path).OutputDeviceId == null, "window shutdown saves the selected default output");
+            var scheduled = Preferences.Load(path);
+            Assert(scheduled.ScheduleEnabled && scheduled.ScheduleStartMinute == scheduled.ScheduleEndMinute,
+                "daily schedule choice and times survive saving and reopening settings");
+        }
+        finally { File.Delete(path); Directory.Delete(folder); }
+    }
+    private static void CheckScheduledAudio()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "LittleQuieter-schedule-audio-" + Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(folder, "settings.xml");
+        DateTime now = DateTime.Now;
+        int minute = (int)now.TimeOfDay.TotalMinutes;
+        new Preferences { ToneVolume = 0, ScheduleEnabled = true, ScheduleStartMinute = (minute + 1438) % 1440, ScheduleEndMinute = (minute + 2) % 1440 }.Save(path);
+        try
+        {
+            using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var exit = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var window = new MainWindow(false, show, exit, path);
+            _ = window.Handle;
+            try
+            {
+                window.ApplySchedule(now);
+                Assert(window.IsListening && HasActiveSession(NAudio.CoreAudioApi.DataFlow.Capture) && HasActiveSession(NAudio.CoreAudioApi.DataFlow.Render),
+                    "scheduled start opens the app's shared audio streams at zero test volume");
+                window.ToggleListening();
+                window.ApplySchedule(now);
+                Assert(!window.IsListening, "manual stop remains paused during the same scheduled period");
+                window.ToggleListening();
+                Assert(window.IsListening, "manual start can resume within the active period");
+                window.ApplySchedule(now.AddMinutes(4));
+                Assert(!window.IsListening && SpinWait.SpinUntil(() => !HasActiveSession(NAudio.CoreAudioApi.DataFlow.Capture) && !HasActiveSession(NAudio.CoreAudioApi.DataFlow.Render), 1500),
+                    "scheduled stop releases both capture and playback streams");
+                window.ApplySchedule(now);
+                Assert(window.IsListening, "entering another active period reopens listening without changing devices");
+            }
+            finally { window.Close(); }
+        }
+        finally { File.Delete(path); Directory.Delete(folder); }
+    }
+    private static bool HasActiveSession(NAudio.CoreAudioApi.DataFlow flow)
+    {
+        using var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+        using var endpoint = enumerator.GetDefaultAudioEndpoint(flow, NAudio.CoreAudioApi.Role.Console);
+        var sessions = endpoint.AudioSessionManager.Sessions;
+        for (int i = 0; i < sessions.Count; i++)
+            if (sessions[i].GetProcessID == Environment.ProcessId && sessions[i].State == NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateActive)
+                return true;
+        return false;
     }
     private static int AudioCheck()
     {
@@ -303,6 +456,7 @@ internal static class Checks
         gate.Suspend(true);
         elapsed.Stop();
         Assert(alarm.IsReady && !alarm.IsActive, "silencing closes only the gate and retains the prepared output");
+        input.Dispose(); // Join the capture callback before reading its timing list.
         Console.WriteLine("In-process gate-close call: " + (elapsed.Elapsed.TotalMilliseconds * 1000).ToString("F1") + " us (excludes device buffering).");
         if (gaps.Count > 0)
         {

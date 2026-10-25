@@ -8,7 +8,7 @@
     <ApplicationIcon>LittleQuieter.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationDefaultFont>Segoe UI, 10pt</ApplicationDefaultFont>
-    <Version>1.3.3</Version>
+    <Version>1.4.0</Version>
     <Description>Local microphone loudness monitor with a steady alarm tone.</Description>
     <DebugType>none</DebugType>
   </PropertyGroup>

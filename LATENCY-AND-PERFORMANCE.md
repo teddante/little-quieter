@@ -13,4 +13,4 @@ A separate 20-second listening sample on a 28-logical-processor PC averaged **0.
 
 Full voice-to-ear latency and gaming/FPS impact remain unmeasured. A muted loopback attempt returned only zeros and was rejected. Raw reports are retained privately.
 
-The app analyzes 5 ms windows and keeps playback ready between alarms. Current checks verify silent startup, prompt gating, feedback rejection and zero managed allocations in steady synthetic processing. See [development commands](CONTRIBUTING.md) to reproduce checks and diagnostics.
+The app analyzes 5 ms windows and keeps playback ready between alarms. Current checks verify silent startup, prompt gating, feedback rejection and zero managed allocations in synthetic analysis, filter resets, gating and tone generation. See [development commands](CONTRIBUTING.md) to reproduce checks and diagnostics.

@@ -75,7 +75,7 @@ Optional local checks:
 
 ```powershell
 .\Check.ps1 -Audio    # Native microphone/playback test at zero volume
-.\Check.ps1 -Running  # Verify an installed app already running in the background
+.\Check.ps1 -Running  # Verify an installed app already listening, with startup enabled
 ```
 
 The ordinary checks exercise callback gating, the stale-input watchdog, signal ramps, PCM/float formats, stereo handling, feedback rejection, calibration and settings migration. They do not play sound or access a microphone. Diagnostic tools in `source/Benchmarks.cs` can measure muted endpoint-clock timing and capture timestamps; generated reports are local and ignored by Git.

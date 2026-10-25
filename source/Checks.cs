@@ -311,12 +311,15 @@ namespace LittleQuieter
         {
             string installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "LittleQuieter", "Little Quieter.exe");
             using var app = Process.GetProcessesByName("Little Quieter").Single(process => String.Equals(process.MainModule.FileName, installed, StringComparison.OrdinalIgnoreCase));
-            Assert(app.Responding && app.MainWindowHandle == IntPtr.Zero, "installed app runs hidden and responsive");
+            Assert(app.Responding, "installed app is responsive");
+            Console.WriteLine("Installed app window: " + (app.MainWindowHandle == IntPtr.Zero ? "hidden" : "open"));
             using var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
             var saved = Preferences.Load(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LittleQuieter", "settings.xml"));
+            string microphoneId = AudioDevice.List(NAudio.CoreAudioApi.DataFlow.Capture).Find(device => device.Name == saved.DeviceName)?.Id;
             foreach (var flow in new[] { NAudio.CoreAudioApi.DataFlow.Capture, NAudio.CoreAudioApi.DataFlow.Render })
             {
-                using var endpoint = flow == NAudio.CoreAudioApi.DataFlow.Render && saved.OutputDeviceId != null ? enumerator.GetDevice(saved.OutputDeviceId) : enumerator.GetDefaultAudioEndpoint(flow, NAudio.CoreAudioApi.Role.Console);
+                string deviceId = flow == NAudio.CoreAudioApi.DataFlow.Capture ? microphoneId : saved.OutputDeviceId;
+                using var endpoint = deviceId == null ? enumerator.GetDefaultAudioEndpoint(flow, NAudio.CoreAudioApi.Role.Console) : enumerator.GetDevice(deviceId);
                 var sessions = endpoint.AudioSessionManager.Sessions;
                 bool active = false;
                 for (int i = 0; i < sessions.Count; i++)

@@ -27,7 +27,7 @@ dotnet format .\source\Checks.csproj --no-restore --verify-no-changes --severity
 
 Follow `.editorconfig`; use short expression-bodied properties where they are clear. To apply only whitespace formatting, use `dotnet format whitespace` on the relevant project. To remove unused imports, use `dotnet format style` with `--diagnostics IDE0005 --severity warn`. Ordinary checks require no microphone or output device. Add focused regression checks for changes to decisions, signal handling or saved settings.
 
-`Check.ps1 -Audio` opens the default microphone and shared playback at zero volume. `Check.ps1 -Running` only inspects an installed background instance. Neither produces an audible test. Do not run an audible tone, launch a game or change global audio settings as part of routine validation.
+`Check.ps1 -Audio` opens the default microphone and shared playback at zero volume. `Check.ps1 -Running` only inspects an installed instance expected to be listening with startup enabled; its window may be open or hidden. It checks the saved microphone/output selection without changing the window or devices. Neither produces an audible test. Do not run an audible tone, launch a game or change global audio settings as part of routine validation.
 
 ## Timing diagnostics
 

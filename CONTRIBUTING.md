@@ -1,6 +1,6 @@
 # Development
 
-Use Windows 11 x64 and the .NET 10 SDK. Open `LittleQuieter.slnx`.
+Use Windows 11 x64 and the .NET SDK selected by `global.json`. Open `LittleQuieter.slnx`.
 
 - `source/`: app code. `checks/`: tests and diagnostics. `work/`: ignored build output.
 - `Directory.Build.props` and `.editorconfig`: shared build and style settings.

@@ -1,10 +1,9 @@
 using System.Diagnostics;
 
-namespace LittleQuieter
+namespace LittleQuieter;
+
+// Monotonic seconds shared by audio callbacks, watchdogs and UI scheduling.
+internal static class AudioClock
 {
-    // Monotonic seconds shared by audio callbacks, watchdogs and UI scheduling.
-    public static class AudioClock
-    {
-        public static double Now => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
-    }
+    public static double Now => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
 }

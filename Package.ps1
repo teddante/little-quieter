@@ -10,7 +10,7 @@ New-Item -ItemType Directory -Path $packageFolder -Force | Out-Null
 $packagePath = Join-Path $packageFolder $packageName
 $files = @(
     'Little Quieter.exe', 'Install.ps1', 'README.md',
-    'WINDOWS-REVIEW.md', 'LATENCY-AND-PERFORMANCE.md', 'CONTRIBUTING.md', 'THIRD-PARTY-NOTICES.txt'
+    'LATENCY-AND-PERFORMANCE.md', 'CONTRIBUTING.md', 'THIRD-PARTY-NOTICES.txt'
 ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
 Compress-Archive -LiteralPath $files -DestinationPath $packagePath -Force
 $checksum = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()

@@ -30,10 +30,7 @@ jobs:
       - name: Build, check and package without audio devices
         run: ./Package.ps1
       - name: Check formatting
-        run: |
-          dotnet format source/LittleQuieter.csproj --no-restore --verify-no-changes --severity warn
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet format source/Checks.csproj --no-restore --verify-no-changes --severity warn
+        run: dotnet format --no-restore --verify-no-changes --severity warn
       - name: Upload Windows build
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -1,46 +1,28 @@
-# Working on Little Quieter
+# Development
 
-Use Windows 11 x64 and the .NET 10 SDK. Dependency versions and hashes are committed in the two NuGet lock files. Change dependencies only when the change is justified; update the relevant lock files deliberately.
+Use Windows 11 x64 and the .NET 10 SDK. Open `LittleQuieter.slnx`.
 
-## Source layout
-
-| Area | Files and responsibility |
-|---|---|
-| Audio capture | `AudioInput.cs` owns the selected microphone and bounded UI summaries; `MicrophoneAnalyzer.cs` decodes native samples into 5 ms readings. |
-| Alarm decisions | `AlarmGate.cs` owns threshold decisions, preview lifetime and stale-input silencing; `AudioClock.cs` supplies monotonic time. |
-| Playback | `AlarmTone.cs` owns the prepared shared output stream; `SteadyToneProvider.cs` generates its fixed tone and short gain ramps. |
-| Feedback rejection | `AlarmRejectionFilter.cs` removes the narrow alarm band before input measurement. |
-| Desktop and UI | `Program.cs` handles single-instance startup; `MainWindow.cs`, `LevelMeter.cs` and `ReminderWindow.cs` implement the interface; `DesktopIntegration.cs` owns startup registration and device notifications. |
-| Settings and calibration | `Preferences.cs` validates and saves settings; `Levels.cs` maps microphone levels and calibrates the threshold. |
-| Verification | `Checks.cs` contains ordinary and optional hardware checks; `Benchmarks.cs` contains silent timing diagnostics. These files are excluded from the shipped executable. |
-
-Keep capture decisions independent of the UI timer. Do not add device creation, UI work, blocking I/O or managed allocations to the steady analysis/gating/rendering path. Use shared audio and app-only routing; leave global audio settings, other processes and games alone.
-
-## Checks and formatting
+- `source/`: app code. `checks/`: tests and diagnostics. `work/`: ignored build output.
+- `Directory.Build.props` and `.editorconfig`: shared build and style settings.
+- Each project has a dependency lock file. Keep dependency changes deliberate.
 
 ```powershell
+.\Build.ps1
 .\Check.ps1
-dotnet format .\source\LittleQuieter.csproj --no-restore --verify-no-changes --severity warn
-dotnet format .\source\Checks.csproj --no-restore --verify-no-changes --severity warn
-.\Package.ps1
+dotnet format --no-restore --verify-no-changes --severity warn
+.\Check.ps1 -Audio    # Silent hardware check at zero volume
+.\Check.ps1 -Running  # Installed app must be listening with startup enabled
+.\Package.ps1         # Build, check and package
 ```
 
-Follow `.editorconfig`; use short expression-bodied properties where they are clear. To apply only whitespace formatting, use `dotnet format whitespace` on the relevant project. To remove unused imports, use `dotnet format style` with `--diagnostics IDE0005 --severity warn`. Ordinary checks require no microphone or output device. Add focused regression checks for changes to decisions, signal handling or saved settings.
+Keep audio callbacks allocation-free and independent of UI updates. Implementation types are internal; `Preferences` is public for XML serialization. Follow [AGENTS.md](AGENTS.md).
 
-`Check.ps1 -Audio` opens the default microphone and shared playback at zero volume. `Check.ps1 -Running` only inspects an installed instance expected to be listening with startup enabled; its window may be open or hidden. It checks the saved microphone/output selection without changing the window or devices. Neither produces an audible test. Do not run an audible tone, launch a game or change global audio settings as part of routine validation.
-
-## Timing diagnostics
-
-After building, these commands save timing metadata only:
+Optional timing tools save metadata only:
 
 ```powershell
-dotnet run --project .\source\Checks.csproj --configuration Release -- --endpoints
-dotnet run --project .\source\Checks.csproj --configuration Release -- --clock-benchmark .\work\clock.json
-dotnet run --project .\source\Checks.csproj --configuration Release -- --capture-timing .\work\capture.json
+dotnet run --project checks/Checks.csproj -c Release -- --endpoints
+dotnet run --project checks/Checks.csproj -c Release -- --clock-benchmark work/clock.json
+dotnet run --project checks/Checks.csproj -c Release -- --capture-timing work/capture.json
 ```
 
-The clock command accepts an optional output endpoint ID after the report path. It mutes only its own session before activating a signal, then stops playback before restoring that session's mute state. Keep timing/resource reports in ignored local folders: they can contain device identifiers. Never commit recordings or personal settings.
-
-Distinguish endpoint-clock timing, capture timestamps and actual acoustic delay. Keep historical measurements labelled with their tested version and machine; a refactor alone is not evidence of faster playback or better gaming performance.
-
-`Package.ps1` is the single packaging entry point for local builds and CI. Its ZIP uses an explicit file list, and its checksum covers the completed ZIP. Installation is separate; use `Install.ps1 -WhatIf` for a non-mutating installer preview.
+The clock test mutes only its own session; an optional output-device ID follows the report path. Keep reports and personal settings out of Git. Endpoint-clock timings are not acoustic latency.

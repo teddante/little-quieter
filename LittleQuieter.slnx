@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="source/LittleQuieter.csproj" />
+  <Project Path="checks/Checks.csproj" />
+</Solution>

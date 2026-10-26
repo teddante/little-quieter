@@ -42,7 +42,7 @@ internal static class Program
             MessageBox.Show("Something went wrong. Stop and restart Little Quieter.\n\n" + e.Exception.Message, "Little Quieter");
         using var showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\LittleQuieter.Show.v1");
         using var exitSignal = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\LittleQuieter.Exit.v1");
-        using var main = new MainWindow(background, showSignal, exitSignal);
+        using var main = new MainWindow(background, showSignal, exitSignal, pausedForUpdateAt: Installation.ReadPauseTime(args));
         // A hidden top-level handle receives Windows shutdown messages too.
         _ = main.Handle;
         Application.Run(main);

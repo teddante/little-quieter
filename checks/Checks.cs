@@ -31,6 +31,8 @@ internal static partial class Checks
             {
                 AudioCheck();
                 WindowChecks(CheckScheduledAudio);
+                WindowChecks(CheckPreviewOutputChanges);
+                WindowChecks(CheckUpdatePauseAudio);
                 return 0;
             }
             if (args.Length > 0 && args[0] == "--running")
@@ -49,6 +51,7 @@ internal static partial class Checks
             SettingsChecks();
             ScheduleChecks();
             DeviceSelectionChecks();
+            DefaultDeviceChangeChecks();
             InstallationChecks();
             WindowChecks();
             WindowChecks(RecoveryWindowCheck);

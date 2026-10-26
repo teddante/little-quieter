@@ -40,12 +40,17 @@ internal sealed class AudioDeviceChanges : IDisposable
     private int version;
     public int Version => Volatile.Read(ref version);
 
-    public AudioDeviceChanges(Action silence)
+    internal static bool AffectsSelection(DataFlow flow, Role role, bool defaultInput, bool defaultOutput)
+    {
+        return role == Role.Console && (flow == DataFlow.Capture && defaultInput || flow == DataFlow.Render && defaultOutput);
+    }
+
+    public AudioDeviceChanges(Action silence, bool defaultInput, bool defaultOutput)
     {
         notifications = enumerator.CreateNotificationClient(false);
         notifications.DefaultDeviceChanged += (_, e) =>
         {
-            if (e.Role != Role.Console)
+            if (!AffectsSelection(e.Flow, e.Role, defaultInput, defaultOutput))
                 return;
             silence();
             Interlocked.Increment(ref version);

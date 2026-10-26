@@ -24,6 +24,8 @@ For an off-screen UI render without opening audio, run `dotnet run --project che
 
 `DailySchedule` uses local calendar time for daily periods, including overnight ranges. Each active period is identified by its start date/time, so sleeping through an inactive period still resumes the next day. It issues one transition per period or configuration change; manual pauses and failures are not retried every UI tick. Audio processing and the stale-input watchdog retain their monotonic clock.
 
+Installation stages files and snapshots the existing files, shortcut and uninstall registration before asking the running app to exit. A failed write restores those snapshots. Update restart arguments carry a pause timestamp separately from settings; they do not change the normal Windows startup command. To support upgrades from older releases, the installer reads the existing process's capture-session activity without opening or modifying streams. Unknown activity resumes paused. Regression checks cover shutdown close reasons, failed-update rollback and relevant default-device changes. Zero-volume audio checks also cover output changes during preview and paused restarts with and without scheduling.
+
 Keep audio callbacks allocation-free and independent of UI updates. Implementation types are internal; `Preferences` is public for XML serialization. Follow [AGENTS.md](AGENTS.md).
 
 Optional timing tools save metadata only:

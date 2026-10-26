@@ -1,4 +1,6 @@
+using System.Reflection;
 using Microsoft.Win32;
+using NAudio.CoreAudioApi;
 
 namespace LittleQuieter;
 
@@ -48,6 +50,16 @@ internal static partial class Checks
         using var popup = new ReminderWindow();
         var dismiss = Descendants(popup).OfType<Button>().Single();
         Assert(!popup.TopMost && popup.ShowInTaskbar && dismiss.TabStop && popup.CancelButton == dismiss, "reminder is not topmost and supports taskbar access, tab navigation and Escape");
+        var close = typeof(Form).GetMethod("OnFormClosing", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        foreach (var reason in new[] { CloseReason.WindowsShutDown, CloseReason.ApplicationExitCall, CloseReason.FormOwnerClosing, CloseReason.TaskManagerClosing })
+        {
+            var closing = new FormClosingEventArgs(reason, false);
+            close.Invoke(popup, new object[] { closing });
+            Assert(!closing.Cancel, "reminder allows closing for " + reason);
+        }
+        var userClosing = new FormClosingEventArgs(CloseReason.UserClosing, false);
+        close.Invoke(popup, new object[] { userClosing });
+        Assert(userClosing.Cancel, "closing a reminder from its window still dismisses it for reuse");
         window.ClientSize = new Size(420, 600);
         window.PerformLayout();
         Assert(Descendants(window).OfType<ComboBox>().All(control => control.Width <= 400), "device selectors fit a narrow window");
@@ -105,6 +117,45 @@ internal static partial class Checks
             Installation.Install(source, installedFolder, shortcut, keyPath);
             Assert(File.ReadAllText(program) == File.ReadAllText(source) && File.ReadAllText(program + ".previous") == "test executable - never launched", "updates replace the executable atomically and retain a rollback copy");
             Assert(File.ReadAllText(settings) == "existing personal settings" && Equals(startupBefore, run?.GetValue("LittleQuieter")), "native installation and updates preserve personal settings and startup registration");
+            byte[] programBefore = File.ReadAllBytes(program);
+            byte[] previousBefore = File.ReadAllBytes(program + ".previous");
+            byte[] scriptBefore = File.ReadAllBytes(Path.Combine(installedFolder, "Uninstall.ps1"));
+            byte[] shortcutBefore = File.ReadAllBytes(shortcut);
+            string? versionBefore = (string?)registration?.GetValue("DisplayVersion");
+            File.WriteAllText(source, "failed update - never launched");
+            string blocked = Path.Combine(folder, "blocked-shortcut-directory");
+            File.WriteAllText(blocked, "prevent shortcut directory creation after file replacement");
+            bool failed = false;
+            try
+            {
+                Installation.Install(source, installedFolder, Path.Combine(blocked, "Little Quieter.lnk"), keyPath);
+            }
+            catch (IOException) { failed = true; }
+            Assert(failed && File.ReadAllBytes(program).SequenceEqual(programBefore) &&
+                File.ReadAllBytes(program + ".previous").SequenceEqual(previousBefore), "a late installation failure restores both the executable and its previous rollback copy");
+            Assert(File.ReadAllBytes(Path.Combine(installedFolder, "Uninstall.ps1")).SequenceEqual(scriptBefore) &&
+                File.ReadAllBytes(shortcut).SequenceEqual(shortcutBefore) && (string?)registration?.GetValue("DisplayVersion") == versionBefore,
+                "failed updates preserve the uninstaller, shortcut and existing Windows registration");
+            string readOnlyScript = Path.Combine(installedFolder, "Uninstall.ps1");
+            File.SetAttributes(readOnlyScript, FileAttributes.ReadOnly);
+            failed = false;
+            try
+            {
+                Installation.Install(source, installedFolder, shortcut, keyPath);
+            }
+            catch (UnauthorizedAccessException) { failed = true; }
+            finally { File.SetAttributes(readOnlyScript, FileAttributes.Normal); }
+            Assert(failed && File.ReadAllBytes(program).SequenceEqual(programBefore), "read-only existing files trigger rollback without breaking the installed executable");
+            Assert(File.ReadAllText(settings) == "existing personal settings" && Equals(startupBefore, run?.GetValue("LittleQuieter")) &&
+                !Directory.EnumerateDirectories(installedFolder, ".install-*").Any(), "failed updates leave settings and startup intact and clean up staging");
+            bool stopRequested = false;
+            try
+            {
+                Installation.Install(source + ".missing", installedFolder, shortcut, keyPath, () => stopRequested = true);
+            }
+            catch (FileNotFoundException) { }
+            Assert(!stopRequested && File.ReadAllBytes(program).SequenceEqual(programBefore),
+                "staging failures leave the installed app running and its executable untouched");
         }
         finally
         {
@@ -116,6 +167,125 @@ internal static partial class Checks
                 throw new IOException("Refusing unexpected installation-check cleanup.");
             Directory.Delete(resolved, true);
         }
+    }
+
+    private static void DefaultDeviceChangeChecks()
+    {
+        Assert(!AudioDeviceChanges.AffectsSelection(DataFlow.Capture, Role.Console, false, false) &&
+            !AudioDeviceChanges.AffectsSelection(DataFlow.Render, Role.Console, false, false),
+            "fixed input and output selections ignore all unrelated Windows default changes");
+        Assert(AudioDeviceChanges.AffectsSelection(DataFlow.Capture, Role.Console, true, false) &&
+            !AudioDeviceChanges.AffectsSelection(DataFlow.Render, Role.Console, true, false),
+            "following the default microphone reacts only to capture changes");
+        Assert(AudioDeviceChanges.AffectsSelection(DataFlow.Render, Role.Console, false, true) &&
+            !AudioDeviceChanges.AffectsSelection(DataFlow.Capture, Role.Console, false, true),
+            "following the default output reacts only to render changes");
+        Assert(!AudioDeviceChanges.AffectsSelection(DataFlow.Capture, Role.Communications, true, true) &&
+            !AudioDeviceChanges.AffectsSelection(DataFlow.Render, Role.Multimedia, true, true),
+            "other Windows audio roles do not restart the app's console-role streams");
+        var pausedAt = new DateTime(2026, 10, 26, 22, 0, 0, DateTimeKind.Local);
+        Assert(Installation.ReadPauseTime(Installation.ResumeArguments(false, pausedAt)) == pausedAt &&
+            Installation.ReadPauseTime(Installation.ResumeArguments(true, pausedAt)) == null,
+            "update restart arguments preserve the exact pause time without altering normal background startup");
+        Assert(Installation.ReadPauseTime(new[] { "--paused-after-update=0" }) is DateTime safePause &&
+            Math.Abs((safePause - DateTime.Now).TotalSeconds) < 2, "invalid pause timestamps fail paused without calendar underflow");
+    }
+
+    private static void InvokeMonitor(MainWindow window, string method)
+    {
+        typeof(MainWindow).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null);
+    }
+
+    private static void CheckPreviewOutputChanges()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "LittleQuieter-preview-check-" + Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(folder, "settings.xml");
+        new Preferences { PlayTone = false, ToneVolume = 0, ShowReminder = false }.Save(path);
+        try
+        {
+            using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var exit = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var window = new MainWindow(false, show, exit, path);
+            _ = window.Handle;
+            try
+            {
+                InvokeMonitor(window, "PreviewAlarm");
+                var alarm = (AlarmTone)typeof(MainWindow).GetField("alarm", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
+                Assert(alarm.IsReady && !window.IsListening, "paused preview prepares only a zero-volume render stream");
+                var output = Descendants(window).OfType<ComboBox>().Single(control => control.AccessibleName == "Alarm output. Only changes Little Quieter");
+                var missing = new AudioDevice { Id = "missing-preview-output", Name = "Missing preview output", Unavailable = true };
+                output.Items.Add(missing);
+                output.SelectedItem = missing;
+                Assert(!alarm.IsReady && !alarm.IsActive, "changing the preview output immediately closes the old endpoint and cancels the preview");
+                InvokeMonitor(window, "PreviewAlarm");
+                Assert(!alarm.IsReady && alarm.Fault == null &&
+                    Descendants(window).OfType<Label>().Any(label => label.Text.StartsWith("Tone unavailable.")),
+                    "previewing an unavailable new output reports failure instead of reusing the previous endpoint");
+            }
+            finally { window.Close(); }
+        }
+        finally { File.Delete(path); Directory.Delete(folder); }
+    }
+
+    private static void CheckUpdatePauseAudio()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "LittleQuieter-update-pause-" + Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(folder, "settings.xml");
+        DateTime now = DateTime.Now;
+        int minute = (int)now.TimeOfDay.TotalMinutes;
+        try
+        {
+            foreach (bool scheduled in new[] { false, true })
+            {
+                new Preferences
+                {
+                    ToneVolume = 0,
+                    ShowReminder = false,
+                    ScheduleEnabled = scheduled,
+                    ScheduleStartMinute = (minute + 1438) % 1440,
+                    ScheduleEndMinute = (minute + 2) % 1440
+                }.Save(path);
+                using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+                using var exit = new EventWaitHandle(false, EventResetMode.AutoReset);
+                using var window = new MainWindow(true, show, exit, path, now);
+                _ = window.Handle;
+                try
+                {
+                    InvokeMonitor(window, "TickMonitor");
+                    Assert(!window.IsListening && !HasActiveSession(DataFlow.Capture) && !HasActiveSession(DataFlow.Render),
+                        "an update preserves a manual pause with scheduling " + (scheduled ? "on" : "off"));
+                    window.ToggleListening();
+                    Assert(window.IsListening && Installation.IsCapturing(Environment.ProcessId),
+                        "manual listening still resumes after a paused update at zero test volume");
+                    window.ToggleListening();
+                    if (scheduled)
+                    {
+                        window.ApplySchedule(now.AddDays(1));
+                        Assert(window.IsListening, "the next scheduled period resumes after a pause preserved through update");
+                    }
+                }
+                finally { window.Close(); }
+            }
+            new Preferences
+            {
+                ToneVolume = 0,
+                ShowReminder = false,
+                ScheduleEnabled = true,
+                ScheduleStartMinute = (minute + 1438) % 1440,
+                ScheduleEndMinute = (minute + 2) % 1440
+            }.Save(path);
+            using var nextShow = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var nextExit = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var next = new MainWindow(true, nextShow, nextExit, path, now.AddDays(-1));
+            _ = next.Handle;
+            try
+            {
+                InvokeMonitor(next, "TickMonitor");
+                Assert(next.IsListening, "a pause from the previous daily period does not suppress today's scheduled listening");
+            }
+            finally { next.Close(); }
+        }
+        finally { File.Delete(path); Directory.Delete(folder); }
     }
 
     private static void PreviewWindow(string imagePath)

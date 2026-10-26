@@ -26,7 +26,14 @@ internal sealed class ReminderWindow : Form
         layout.Controls.Add(message, 0, 0);
         layout.Controls.Add(dismiss, 0, 1);
         Controls.Add(layout);
-        FormClosing += (_, e) => { e.Cancel = true; Hide(); };
+        FormClosing += (_, e) =>
+        {
+            if (e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                Hide();
+            }
+        };
     }
     // Avoid stealing focus, while remaining reachable through the taskbar and Alt+Tab.
     protected override bool ShowWithoutActivation => true;

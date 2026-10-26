@@ -14,6 +14,7 @@ internal sealed partial class MainWindow : Form
     private readonly List<double> calibration = new List<double>();
     private readonly EventWaitHandle showSignal, exitSignal;
     private readonly bool background;
+    private readonly bool pauseAfterUpdate;
     private AudioInput? input;
     private AudioDeviceChanges? deviceChanges;
     private int deviceVersion;
@@ -174,7 +175,7 @@ internal sealed partial class MainWindow : Form
         try
         {
             candidate.Start(device.Id);
-            deviceChanges = new AudioDeviceChanges(() => gate.Suspend(true));
+            deviceChanges = new AudioDeviceChanges(() => gate.Suspend(true), device.Id == null, (outputs.SelectedItem as AudioDevice)?.Id == null);
         }
         catch (Exception error)
         {
@@ -285,7 +286,7 @@ internal sealed partial class MainWindow : Form
         if (!initialized)
         {
             initialized = true;
-            if (background && !preferences.IsNew && !preferences.NeedsRecovery && !scheduleEnabled.Checked)
+            if (background && !pauseAfterUpdate && !preferences.IsNew && !preferences.NeedsRecovery && !scheduleEnabled.Checked)
                 StartListening(true);
         }
         ApplySchedule(DateTime.Now);
@@ -403,6 +404,17 @@ internal sealed partial class MainWindow : Form
         gate.Preview(now);
         StartWatchdog();
         UpdateReminder(gate.Active, gate.IsPreviewing(now));
+    }
+    private void ChangeOutput()
+    {
+        if (input == null)
+        {
+            gate.Reset();
+            alarm.Dispose();
+            watchdog.Change(Timeout.Infinite, Timeout.Infinite);
+            UpdateReminder(false, false);
+        }
+        QueueSave();
     }
     private void UpdateReminder(bool active, bool previewing)
     {

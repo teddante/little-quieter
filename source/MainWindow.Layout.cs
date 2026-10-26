@@ -15,7 +15,7 @@ internal sealed partial class MainWindow
     private readonly ToolStripMenuItem trayToggle, trayTest;
     private readonly System.Windows.Forms.Timer timer;
 
-    public MainWindow(bool startInBackground, EventWaitHandle show, EventWaitHandle exit, string? preferencesPath = null)
+    public MainWindow(bool startInBackground, EventWaitHandle show, EventWaitHandle exit, string? preferencesPath = null, DateTime? pausedForUpdateAt = null)
     {
         background = startInBackground;
         showSignal = show;
@@ -137,13 +137,18 @@ internal sealed partial class MainWindow
         };
         toneVolume.ValueChanged += (_, _) => { alarm.SetVolume((int)toneVolume.Value); ConfigureGate(); QueueSave(); };
         microphones.SelectedIndexChanged += (_, _) => QueueSave();
-        outputs.SelectedIndexChanged += (_, _) => QueueSave();
+        outputs.SelectedIndexChanged += (_, _) => ChangeOutput();
         scheduleEnabled.CheckedChanged += (_, _) => ChangeSchedule();
         scheduleStart.ValueChanged += (_, _) => ChangeSchedule();
         scheduleEnd.ValueChanged += (_, _) => ChangeSchedule();
         ConfigureGate();
         if (preferences.NeedsRecovery)
             SetSettingsEnabled(false);
+        DateTime launchTime = DateTime.Now;
+        pauseAfterUpdate = pausedForUpdateAt.HasValue && (!scheduleEnabled.Checked ||
+            DailySchedule.ActivePeriodStart(StartMinute, EndMinute, pausedForUpdateAt.Value) == DailySchedule.ActivePeriodStart(StartMinute, EndMinute, launchTime));
+        if (pauseAfterUpdate)
+            dailySchedule.Update(scheduleEnabled.Checked, StartMinute, EndMinute, launchTime);
         UpdateScheduleControls(DateTime.Now);
         SavePreferences(false);
     }

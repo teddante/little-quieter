@@ -14,9 +14,13 @@ Requires **Windows 11 x64** and the [**.NET 10 Desktop Runtime**](https://dotnet
 
 Minimize to keep listening; double-click the tray icon to reopen. Closing the window exits. Use the startup checkbox to control automatic listening after sign-in.
 
+Updates keep a running app listening or paused as it was, without changing your Windows startup choice. A scheduled pause lasts until the next daily period. If the app was closed, an update leaves it closed. Files are staged before the running app exits; a failed replacement restores the previous files and app registration. When upgrading a paused version older than 1.5.1, a failure leaves the restored app closed because those versions cannot accept a paused restart.
+
 The window resizes and uses the Windows light/dark colour mode selected when the app starts. Standard controls support high-contrast colours and keyboard navigation. The live meter exposes its value to assistive technology. **Show visual reminder** controls the separate reminder window; it does not stay on top or steal focus. Use its Dismiss button, Escape, or the tray menu to dismiss it.
 
 Explicit microphone selections use endpoint IDs. A disconnected microphone stays selected as unavailable; the app pauses instead of opening another microphone. Old name-only selections migrate when their names match exactly one device.
+
+Only changes to a Windows default device that you actually selected restart monitoring. Changing the alarm output while a preview is playing cancels it immediately; the next test uses the new output. Reminder windows allow Windows shutdown and sign-out normally.
 
 For automatic hours, choose **From** and **to**, then enable **Listen on a daily schedule**. It is off by default. Times use your PC's local clock and repeat every day; overnight ranges such as 22:00–07:00 work. Outside those hours, the microphone and alarm streams close. Equal start/end times keep listening off until you choose different times. Keep the app running in the tray; it does not wake a sleeping PC. **Stop listening** pauses the current scheduled period; the next period resumes automatically, or you can start listening again yourself.
 

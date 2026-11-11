@@ -2,6 +2,8 @@
 
 Use Windows 11 x64 and the .NET SDK selected by `global.json`. Open `LittleQuieter.slnx`.
 
+The SDK is pinned to an exact version because SDK patch updates can change implicit build dependencies. Update `global.json` and regenerate dependency locks together when upgrading it.
+
 - `source/`: app code; `MainWindow.Layout.cs` contains the window layout and event wiring, and `MainWindow.cs` handles monitoring and application state.
 - `checks/`: tests and diagnostics. `work/`: ignored build output, with the executable in `work/publish/`.
 - `Directory.Build.props` and `.editorconfig`: shared build and style settings.
@@ -12,11 +14,11 @@ Use Windows 11 x64 and the .NET SDK selected by `global.json`. Open `LittleQuiet
 .\Check.ps1
 dotnet format --no-restore --verify-no-changes --severity warn
 .\Check.ps1 -Audio    # Silent hardware check at zero volume
-.\Check.ps1 -Running  # Verify installed app, scheduled streams and startup
+.\Check.ps1 -Running  # Report installed app's streams and startup registration
 .\Package.ps1         # Build, check and package
 ```
 
-The ordinary checks cover signal processing, settings recovery, microphone identity, daily scheduling, a hidden paused window, native installer copies, temporary COM shortcuts and an isolated per-user test registry key. Wrapper/removal checks simulate live registry operations. They do not open audio streams or change the installed app. `Check.ps1 -Audio` additionally exercises scheduled stream opening/closing at zero test volume. Installation from the repository uses `work/publish/`; run `Build.ps1` first. Installation never rewrites Run or StartupApproved registration.
+The ordinary checks cover signal processing, settings recovery, microphone identity, unavailable outputs, daily scheduling, a hidden paused window, native installer copies, temporary COM shortcuts and an isolated per-user test registry key. Wrapper/removal checks simulate live registry operations. They do not open audio streams or change the installed app. `Check.ps1 -Audio` additionally exercises scheduled stream opening/closing and restoration of the prior listening state after learning, at zero test volume. `Check.ps1 -Running` reports the installed app's actual state without assuming that listening or startup must be enabled. Installation from the repository uses `work/publish/`; run `Build.ps1` first. Installation never rewrites Run or StartupApproved registration.
 
 `Package.ps1` includes a native **Little Quieter Setup.exe**, using the app's `--install` entry point. Installation stages and verifies the executable before replacement and keeps the previous EXE for rollback. Trusted publisher signing still requires an externally supplied code-signing certificate; do not generate or trust a self-signed certificate as a substitute.
 

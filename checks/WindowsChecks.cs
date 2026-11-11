@@ -227,6 +227,85 @@ internal static partial class Checks
         finally { File.Delete(path); Directory.Delete(folder); }
     }
 
+    private static void CheckUnavailableOutputs()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "LittleQuieter-output-check-" + Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(folder, "settings.xml");
+        new Preferences { PlayTone = false, ToneVolume = 0, ShowReminder = false, OutputDeviceName = "Disconnected legacy output" }.Save(path);
+        try
+        {
+            using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var exit = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var window = new MainWindow(false, show, exit, path);
+            _ = window.Handle;
+            try
+            {
+                var output = Descendants(window).OfType<ComboBox>().Single(control => control.AccessibleName == "Alarm output. Only changes Little Quieter");
+                var alarm = (AlarmTone)typeof(MainWindow).GetField("alarm", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
+                Assert(output.SelectedItem is AudioDevice { Id: null, Unavailable: true }, "a missing legacy output remains selected as unavailable");
+                InvokeMonitor(window, "PreviewAlarm");
+                Assert(!alarm.IsReady && Descendants(window).OfType<Label>().Any(label => label.Text.StartsWith("Tone unavailable.")),
+                    "a missing legacy output cannot route a preview to the Windows default");
+                output.SelectedIndex = -1;
+                InvokeMonitor(window, "PreviewAlarm");
+                Assert(!alarm.IsReady, "an empty output selection cannot implicitly open the Windows default");
+            }
+            finally { window.Close(); }
+        }
+        finally { File.Delete(path); Directory.Delete(folder); }
+    }
+
+    private static void CheckCalibrationAudio()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "LittleQuieter-calibration-check-" + Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(folder, "settings.xml");
+        new Preferences { ToneVolume = 0, ShowReminder = false, Limit = 50 }.Save(path);
+        try
+        {
+            using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var exit = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var window = new MainWindow(false, show, exit, path);
+            _ = window.Handle;
+            try
+            {
+                foreach (bool listening in new[] { false, true })
+                    foreach (string outcome in new[] { "cancel", "failure", "success", "device change" })
+                    {
+                        if (window.IsListening != listening)
+                            window.ToggleListening();
+                        var limit = Descendants(window).OfType<TrackBar>().Single();
+                        limit.Value = 50;
+                        InvokeMonitor(window, "ToggleCalibration");
+                        Assert(window.IsListening && !limit.Enabled, "learning opens the microphone with alarms suspended");
+                        if (outcome == "success")
+                        {
+                            var readings = (List<double>)typeof(MainWindow).GetField("calibration", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
+                            for (int i = 0; i < 80; i++)
+                                readings.Add(-40 + i % 20);
+                        }
+                        if (outcome == "cancel")
+                            InvokeMonitor(window, "ToggleCalibration");
+                        else
+                        {
+                            if (outcome == "device change")
+                                typeof(MainWindow).GetField("deviceVersion", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, -1);
+                            else
+                                typeof(MainWindow).GetField("calibrationEnd", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, 0.0);
+                            InvokeMonitor(window, "TickMonitor");
+                        }
+                        Assert(window.IsListening == listening && limit.Enabled && (outcome == "success" ? limit.Value > 50 : limit.Value == 50),
+                            "learning " + outcome + " restores the previous " + (listening ? "listening" : "paused") + " state and applies only a successful limit");
+                        if (!listening)
+                            Assert(!HasActiveSession(DataFlow.Capture) && !HasActiveSession(DataFlow.Render) &&
+                                Descendants(window).OfType<Label>().Any(label => label.Text == "PAUSED · MICROPHONE OFF"),
+                                "finishing learning from paused releases both streams and keeps the paused status");
+                    }
+            }
+            finally { window.Close(); }
+        }
+        finally { File.Delete(path); Directory.Delete(folder); }
+    }
+
     private static void CheckUpdatePauseAudio()
     {
         string folder = Path.Combine(Path.GetTempPath(), "LittleQuieter-update-pause-" + Guid.NewGuid().ToString("N"));

@@ -122,14 +122,15 @@ internal sealed partial class MainWindow : Form
         var selectedOutput = outputs.SelectedItem as AudioDevice;
         string? outputId = selectedOutput == null ? preferences.OutputDeviceId : selectedOutput.Id;
         string outputName = selectedOutput?.Name ?? preferences.OutputDeviceName;
-        microphones.Items.Clear();
-        outputs.Items.Clear();
         try
         {
             var captureDevices = AudioDevice.List(DataFlow.Capture);
+            var renderDevices = AudioDevice.List(DataFlow.Render);
+            // Keep both selections intact if either enumeration fails.
+            microphones.Items.Clear();
+            outputs.Items.Clear();
             microphones.Items.AddRange(captureDevices.ToArray());
             SelectDevice(microphones, AudioDevice.Select(captureDevices, inputId, inputName, AudioDevice.DefaultMicrophoneName));
-            var renderDevices = AudioDevice.List(DataFlow.Render);
             outputs.Items.AddRange(renderDevices.ToArray());
             SelectDevice(outputs, AudioDevice.Select(renderDevices, outputId, outputName, AudioDevice.DefaultOutputName));
         }
@@ -146,7 +147,9 @@ internal sealed partial class MainWindow : Form
         soundFailed = false;
         try
         {
-            alarm.Start((int)toneVolume.Value, (outputs.SelectedItem as AudioDevice)?.Id);
+            if (outputs.SelectedItem is not AudioDevice { Unavailable: false } device)
+                throw new InvalidOperationException("Select an available alarm output, or reconnect it and Refresh.");
+            alarm.Start((int)toneVolume.Value, device.Id);
         }
         catch (Exception error) { soundFailed = true; footer.Text = "Tone unavailable. Check sound output, then use Test tone. " + error.Message; }
         ConfigureGate();
@@ -257,11 +260,7 @@ internal sealed partial class MainWindow : Form
     {
         if (calibrating)
         {
-            SetCalibration(false);
-            if (!beforeCalibration)
-                StopListening("Learning cancelled. Your previous limit is unchanged.");
-            else
-                footer.Text = "Learning cancelled. Your previous limit is unchanged.";
+            FinishCalibration("Learning cancelled. Your previous limit is unchanged.");
             return;
         }
         beforeCalibration = input != null;
@@ -301,19 +300,18 @@ internal sealed partial class MainWindow : Form
         if (input == null)
         {
             if (!previewing && previousPreview)
-            {
-                gate.Reset();
-                alarm.Dispose();
-                watchdog.Change(Timeout.Infinite, Timeout.Infinite);
-            }
-            UpdateReminder(false, previewing);
+                StopPreview();
+            else
+                UpdateReminder(false, previewing);
             return;
         }
         if (deviceChanges == null || deviceChanges.Version != deviceVersion)
         {
+            bool resumeListening = !calibrating || beforeCalibration;
             StopListening("Audio device changed.");
             LoadDevices();
-            StartListening(true);
+            if (resumeListening)
+                StartListening(true);
             return;
         }
         if (input.Fault != null)
@@ -335,7 +333,11 @@ internal sealed partial class MainWindow : Form
             return;
         }
         if (calibrating && now >= calibrationEnd)
+        {
             CompleteCalibration();
+            if (input == null)
+                return;
+        }
         bool active = gate.Active;
         UpdateReminder(active, previewing);
         if (Visible)
@@ -360,14 +362,25 @@ internal sealed partial class MainWindow : Form
     }
     private void CompleteCalibration()
     {
+        string message;
         if (Levels.TryCalibrate(calibration, out int learned))
         {
             limit.Value = learned;
-            footer.Text = "Learned your normal voice. Adjust the limit if needed.";
+            message = "Learned your normal voice. Adjust the limit if needed.";
         }
         else
-            footer.Text = "Couldn't learn a clear voice level. Try again or set the limit manually.";
-        SetCalibration(false);
+            message = "Couldn't learn a clear voice level. Try again or set the limit manually.";
+        FinishCalibration(message);
+    }
+    private void FinishCalibration(string message)
+    {
+        if (!beforeCalibration)
+            StopListening(message);
+        else
+        {
+            SetCalibration(false);
+            footer.Text = message;
+        }
     }
     private void UpdateLevelDisplay(double now, bool active, bool changed, bool clipped)
     {
@@ -408,13 +421,15 @@ internal sealed partial class MainWindow : Form
     private void ChangeOutput()
     {
         if (input == null)
-        {
-            gate.Reset();
-            alarm.Dispose();
-            watchdog.Change(Timeout.Infinite, Timeout.Infinite);
-            UpdateReminder(false, false);
-        }
+            StopPreview();
         QueueSave();
+    }
+    private void StopPreview()
+    {
+        gate.Reset();
+        alarm.Dispose();
+        watchdog.Change(Timeout.Infinite, Timeout.Infinite);
+        UpdateReminder(false, false);
     }
     private void UpdateReminder(bool active, bool previewing)
     {

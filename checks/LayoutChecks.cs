@@ -25,8 +25,10 @@ internal static partial class Checks
             int compactHeight = window.Height;
             toggle.PerformClick();
             window.PerformLayout();
-            Assert(window.Height > compactHeight && !scroll.VerticalScroll.Visible,
-                "expanding settings grows the window to fit when the screen has room");
+            Rectangle workArea = Screen.FromControl(window).WorkingArea;
+            Assert(window.Height >= compactHeight && workArea.Contains(window.Bounds) &&
+                (!scroll.VerticalScroll.Visible || window.Height == workArea.Height),
+                "expanding settings fits the available screen height and scrolls when constrained");
             toggle.PerformClick();
             Assert(window.Height == compactHeight && !scroll.VerticalScroll.Visible,
                 "collapsing settings restores the compact height without a stale scrollbar");

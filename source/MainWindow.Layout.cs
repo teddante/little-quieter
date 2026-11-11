@@ -30,6 +30,7 @@ internal sealed partial class MainWindow
         watchdog = new System.Threading.Timer(_ => gate.Refresh(AudioClock.Now), null, Timeout.Infinite, Timeout.Infinite);
         settingsPath = preferencesPath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LittleQuieter", "settings.xml");
         preferences = Preferences.Load(settingsPath);
+        appliedVolume = preferences.ToneVolume;
         preferencesSaved = !preferences.IsNew && !preferences.NeedsRecovery;
         showRequested = preferences.IsNew || preferences.NeedsRecovery;
         Text = "Little Quieter";

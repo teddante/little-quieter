@@ -38,6 +38,7 @@ internal static partial class Checks
                 WindowChecks(CheckVisualOnlyAudio);
                 WindowChecks(CheckEarlyBackgroundPauseAudio);
                 WindowChecks(CheckLiveVolumeEditing);
+                WindowChecks(CheckCalibrationOutputFailure);
                 return 0;
             }
             if (args.Length > 0 && args[0] == "--running")
@@ -72,6 +73,8 @@ internal static partial class Checks
             WindowChecks(CheckLiveMeterAndTheme);
             WindowChecks(CheckWindowThemeState);
             WindowChecks(CheckVolumeEditing);
+            WindowChecks(CheckPendingVolumeEdit);
+            WindowChecks(CheckScheduleEditing);
             WindowChecks(CheckWindowSizing);
             Console.WriteLine("All " + count + " checks passed.");
             return 0;

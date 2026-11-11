@@ -7,7 +7,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>LittleQuieter.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <Version>1.5.3</Version>
+    <Version>1.5.4</Version>
     <Description>Local microphone loudness monitor with a steady alarm tone.</Description>
     <DebugType>none</DebugType>
   </PropertyGroup>

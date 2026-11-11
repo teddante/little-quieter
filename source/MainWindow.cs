@@ -18,6 +18,7 @@ internal sealed partial class MainWindow : Form
     private AudioInput? input;
     private AudioDeviceChanges? deviceChanges;
     private int deviceVersion;
+    private int appliedVolume; // Reading NumericUpDown.Value would commit unfinished keyboard input.
     private bool showRequested, initialized, changingStartup, soundFailed, loadingDevices, refreshingTheme;
     private (SystemColorMode Mode, bool HighContrast) lastTheme = WindowTheme.Current;
     private bool calibrating, beforeCalibration, closing, ticking, preferencesDirty, preferencesSaved;
@@ -26,7 +27,7 @@ internal sealed partial class MainWindow : Form
     private int StartMinute => (int)scheduleStart.Value.TimeOfDay.TotalMinutes;
     private int EndMinute => (int)scheduleEnd.Value.TimeOfDay.TotalMinutes;
     internal bool IsListening => input != null;
-    private bool AutomaticTone => playTone.Checked && toneVolume.Value > 0 && !calibrating;
+    private bool AutomaticTone => playTone.Checked && appliedVolume > 0 && !calibrating;
 
     private bool ScheduleAllowsListening(DateTime localNow) =>
         !preferences.NeedsRecovery && (!scheduleEnabled.Checked || DailySchedule.ActivePeriodStart(StartMinute, EndMinute, localNow).HasValue);
@@ -49,7 +50,7 @@ internal sealed partial class MainWindow : Form
             return;
         }
         bool? decision = dailySchedule.Update(scheduleEnabled.Checked, StartMinute, EndMinute, localNow);
-        if (decision == true)
+        if (decision == true && input == null)
             await ChangeAudio(async () => { await StartListeningCore(true); });
         else if (decision == false && input != null)
             await ChangeAudio(() => StopListeningCore("Outside your scheduled hours. Your microphone is off."));
@@ -290,7 +291,7 @@ internal sealed partial class MainWindow : Form
         else
         {
             stateCaption.Text = active ? "ABOVE YOUR LIMIT · QUIETEN DOWN" : "LISTENING · WITHIN YOUR LIMIT";
-            liveCaption.Text = clipped ? "Input is clipping. Lower mic gain or move it back." : meter.Value < 3 ? "Very little input. Check your mic if you're speaking." : (!playTone.Checked || toneVolume.Value == 0) && !showReminder.Checked ? "Meter only · alerts are off" : "Limit " + limit.Value;
+            liveCaption.Text = clipped ? "Input is clipping. Lower mic gain or move it back." : meter.Value < 3 ? "Very little input. Check your mic if you're speaking." : (!playTone.Checked || appliedVolume == 0) && !showReminder.Checked ? "Meter only · alerts are off" : "Limit " + limit.Value;
         }
     }
 
@@ -350,7 +351,7 @@ internal sealed partial class MainWindow : Form
             return;
         preferences.Limit = limit.Value;
         preferences.PlayTone = playTone.Checked;
-        preferences.ToneVolume = (int)toneVolume.Value;
+        preferences.ToneVolume = appliedVolume;
         preferences.ScheduleEnabled = scheduleEnabled.Checked;
         preferences.ScheduleStartMinute = StartMinute;
         preferences.ScheduleEndMinute = EndMinute;

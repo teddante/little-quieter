@@ -42,7 +42,7 @@ internal sealed partial class MainWindow
             ConfigureGate();
             return false;
         }
-        int volume = (int)toneVolume.Value;
+        int volume = appliedVolume;
         int generation = audioGeneration;
         gate.Suspend(true);
         try
@@ -273,7 +273,7 @@ internal sealed partial class MainWindow
             if (!closing && generation == audioGeneration)
             {
                 gate.Suspend(false);
-                footer.Text = message;
+                footer.Text = AutomaticTone && soundFailed ? message + " " + footer.Text : message;
             }
         }
     }
@@ -293,7 +293,7 @@ internal sealed partial class MainWindow
         if (deviceChanges != null)
             deviceChanges.FollowDefaultOutput = (outputs.SelectedItem as AudioDevice)?.Id == null;
         StartWatchdog();
-        footer.Text = toneVolume.Value == 0 ? "Test is silent: alarm volume is 0%." : "Testing the selected output for two seconds.";
+        footer.Text = appliedVolume == 0 ? "Test is silent: alarm volume is 0%." : "Testing the selected output for two seconds.";
         UpdateReminder(gate.Active, true);
     });
 
@@ -317,7 +317,8 @@ internal sealed partial class MainWindow
         if (refreshingTheme)
             return Task.CompletedTask;
         QueueSave();
-        alarm.SetVolume((int)toneVolume.Value);
+        appliedVolume = (int)toneVolume.Value;
+        alarm.SetVolume(appliedVolume);
         if (!AutomaticTone && !gate.IsPreviewing(AudioClock.Now))
         {
             if (soundFailed)
@@ -389,6 +390,7 @@ internal sealed partial class MainWindow
         tray.Visible = false;
         tray.ContextMenuStrip?.Dispose();
         tray.Dispose();
+        appliedVolume = (int)toneVolume.Value; // Closing commits a pending edit; polling and autosave must not.
         SavePreferences(report);
         timer.Dispose();
         Enabled = false;

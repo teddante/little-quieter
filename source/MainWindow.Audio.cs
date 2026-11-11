@@ -5,6 +5,7 @@ internal sealed partial class MainWindow
     private bool audioBusy, pausingAfterError, errorPaused;
     private int audioGeneration;
     private Task audioOperation = Task.CompletedTask;
+    private string? previewStatus;
     internal Task AudioIdle => audioOperation;
 
     // Only one transition owns the devices. Continuations return to the UI thread;
@@ -278,6 +279,15 @@ internal sealed partial class MainWindow
         }
     }
 
+    private string PreviewMessage => appliedVolume == 0 ? "Test is silent: alarm volume is 0%." : "Testing the selected output for two seconds.";
+
+    private void FinishPreviewStatus(string message)
+    {
+        if (previewStatus != null && footer.Text == previewStatus)
+            footer.Text = message;
+        previewStatus = null;
+    }
+
     private Task PreviewAlarm() => ChangeAudio(async () =>
     {
         if (calibrating || preferences.NeedsRecovery)
@@ -293,7 +303,7 @@ internal sealed partial class MainWindow
         if (deviceChanges != null)
             deviceChanges.FollowDefaultOutput = (outputs.SelectedItem as AudioDevice)?.Id == null;
         StartWatchdog();
-        footer.Text = appliedVolume == 0 ? "Test is silent: alarm volume is 0%." : "Testing the selected output for two seconds.";
+        previewStatus = footer.Text = PreviewMessage;
         UpdateReminder(gate.Active, true);
     });
 
@@ -305,6 +315,7 @@ internal sealed partial class MainWindow
         return ChangeAudio(async () =>
         {
             gate.CancelPreview();
+            FinishPreviewStatus("Test cancelled. Use Test tone for the selected output.");
             reminderState.Reset();
             reminder.Hide();
             if (input == null)
@@ -319,6 +330,8 @@ internal sealed partial class MainWindow
         QueueSave();
         appliedVolume = (int)toneVolume.Value;
         alarm.SetVolume(appliedVolume);
+        if (previewStatus != null && footer.Text == previewStatus && gate.IsPreviewing(AudioClock.Now))
+            previewStatus = footer.Text = PreviewMessage;
         if (!AutomaticTone && !gate.IsPreviewing(AudioClock.Now))
         {
             if (soundFailed)

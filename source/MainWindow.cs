@@ -202,6 +202,8 @@ internal sealed partial class MainWindow : Form
             return;
         double now = AudioClock.Now;
         bool previewing = gate.IsPreviewing(now);
+        if (!previewing)
+            FinishPreviewStatus(input == null ? "Test finished. Your microphone is off." : "Test finished. Listening.");
         timer.Interval = Visible || calibrating || gate.Active || reminder.Visible || previewing ? 100 : 250;
         if (saveAt > 0 && now >= saveAt)
             SavePreferences(false);

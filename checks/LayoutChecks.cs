@@ -133,8 +133,12 @@ internal static partial class Checks
                 volume.UpButton();
             Assert(volume.Value == 100 && disabled == 0 && window.ActiveControl == volume && ReferenceEquals(player, alarm.Player) && player.IsMuted,
                 "live volume arrows keep the prepared output, active editor and test-session mute intact");
+            Assert(Descendants(window).OfType<Label>().Any(label => label.Text == "Testing the selected output for two seconds."),
+                "preview status follows a committed change from zero to nonzero volume");
             volume.Value = 0;
             Finish(window.AudioIdle);
+            Assert(Descendants(window).OfType<Label>().Any(label => label.Text == "Test is silent: alarm volume is 0%."),
+                "preview status reports a committed change back to silent volume");
             CloseWindow(window);
         }
         finally { File.Delete(path); Directory.Delete(folder); }

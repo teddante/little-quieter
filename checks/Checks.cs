@@ -39,6 +39,7 @@ internal static partial class Checks
                 WindowChecks(CheckEarlyBackgroundPauseAudio);
                 WindowChecks(CheckLiveVolumeEditing);
                 WindowChecks(CheckCalibrationOutputFailure);
+                WindowChecks(CheckPreviewStatus);
                 return 0;
             }
             if (args.Length > 0 && args[0] == "--running")
@@ -54,6 +55,7 @@ internal static partial class Checks
             GateChecks();
             ReminderChecks();
             StartupChecks();
+            CheckStartupOwnership();
             ToneChecks();
             AnalyzerChecks();
             InputSummaryChecks();
@@ -74,6 +76,7 @@ internal static partial class Checks
             WindowChecks(CheckWindowThemeState);
             WindowChecks(CheckVolumeEditing);
             WindowChecks(CheckPendingVolumeEdit);
+            WindowChecks(CheckThemeDuringVolumeEdit);
             WindowChecks(CheckScheduleEditing);
             WindowChecks(CheckWindowSizing);
             Console.WriteLine("All " + count + " checks passed.");

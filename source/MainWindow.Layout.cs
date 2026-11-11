@@ -2,6 +2,7 @@ namespace LittleQuieter;
 
 internal sealed partial class MainWindow
 {
+    private const int PreferredClientWidth = 620;
     private readonly ComboBox microphones, outputs;
     private readonly TrackBar limit;
     private readonly Label limitCaption, stateCaption, levelCaption, liveCaption, footer;
@@ -18,7 +19,6 @@ internal sealed partial class MainWindow
     private readonly Panel scroll;
     private readonly TableLayoutPanel content;
     private readonly FlowLayoutPanel primaryActions;
-    private FormWindowState restoredWindowState = FormWindowState.Normal;
 
     public MainWindow(bool startInBackground, EventWaitHandle show, EventWaitHandle exit, string? preferencesPath = null, DateTime? pausedForUpdateAt = null)
     {
@@ -38,8 +38,9 @@ internal sealed partial class MainWindow
         Font = SystemFonts.MessageBoxFont;
         AutoScaleDimensions = new SizeF(96, 96);
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(620, 540);
-        MinimumSize = new Size(460, 520);
+        ClientSize = new Size(PreferredClientWidth, 540);
+        FormBorderStyle = FormBorderStyle.FixedSingle;
+        MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(20) };
         content = Column();
@@ -78,7 +79,7 @@ internal sealed partial class MainWindow
             settingsExpanded = !settingsExpanded;
             settings.Visible = settingsExpanded;
             settingsToggle.Text = settingsExpanded ? "Hide devices, startup and schedule" : "Show devices, startup and schedule";
-            FitWindow(true);
+            FitWindow();
         };
         AddRow(settings, Caption("Microphone", true));
         microphones = DevicePicker("Microphone");
@@ -151,8 +152,6 @@ internal sealed partial class MainWindow
         {
             if (WindowState == FormWindowState.Minimized)
                 Hide();
-            else
-                restoredWindowState = WindowState;
         };
         FormClosing += async (_, e) =>
         {
@@ -171,8 +170,8 @@ internal sealed partial class MainWindow
                 Close();
             }
         };
-        Shown += (_, _) => FitWindow(true);
-        DpiChanged += (_, _) => BeginInvoke(() => { if (!closing) FitWindow(false); });
+        Shown += (_, _) => FitWindow();
+        DpiChanged += (_, _) => BeginInvoke(() => { if (!closing) FitWindow(); });
         timer = new System.Windows.Forms.Timer { Interval = 100 };
         timer.Tick += async (_, _) => await TickMonitor();
         timer.Start();
@@ -205,26 +204,22 @@ internal sealed partial class MainWindow
         ResumeLayout(true);
     }
 
-    internal void FitWindow(bool fitContent, Rectangle? workingArea = null)
+    internal void FitWindow(Rectangle? workingArea = null)
     {
-        Rectangle area = workingArea ?? Screen.FromControl(this).WorkingArea;
-        int width = Math.Max(LogicalToDeviceUnits(444), primaryActions.PreferredSize.Width + scroll.Padding.Horizontal + SystemInformation.VerticalScrollBarWidth);
-        Size minimum = SizeFromClientSize(new Size(width, LogicalToDeviceUnits(480)));
-        MinimumSize = new Size(Math.Min(minimum.Width, area.Width), Math.Min(minimum.Height, area.Height));
         if (WindowState != FormWindowState.Normal)
             return;
-        Width = Math.Clamp(Width, MinimumSize.Width, area.Width);
-        if (fitContent)
-        {
-            scroll.AutoScrollPosition = Point.Empty;
-            content.PerformLayout();
-            int height = SizeFromClientSize(new Size(ClientSize.Width,
-                content.GetPreferredSize(new Size(content.Width, 0)).Height + scroll.Padding.Vertical)).Height;
-            Height = Math.Clamp(height, MinimumSize.Height, area.Height);
-        }
-        else
-            Height = Math.Clamp(Height, MinimumSize.Height, area.Height);
+        Rectangle area = workingArea ?? Screen.FromControl(this).WorkingArea;
+        // Release the old limits while fitting, then lock the resulting size.
+        MinimumSize = MaximumSize = Size.Empty;
+        int width = Math.Max(LogicalToDeviceUnits(PreferredClientWidth), primaryActions.PreferredSize.Width + scroll.Padding.Horizontal + SystemInformation.VerticalScrollBarWidth);
+        Width = Math.Min(SizeFromClientSize(new Size(width, 0)).Width, area.Width);
+        scroll.AutoScrollPosition = Point.Empty;
+        content.PerformLayout();
+        int height = SizeFromClientSize(new Size(ClientSize.Width,
+            content.GetPreferredSize(new Size(content.Width, 0)).Height + scroll.Padding.Vertical)).Height;
+        Height = Math.Min(height, area.Height);
         Location = new Point(Math.Clamp(Left, area.Left, area.Right - Width), Math.Clamp(Top, area.Top, area.Bottom - Height));
+        MinimumSize = MaximumSize = Size;
     }
     protected override void SetVisibleCore(bool value)
     {

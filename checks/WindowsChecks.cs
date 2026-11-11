@@ -39,7 +39,8 @@ internal static partial class Checks
         Assert(microphone.SelectedItem is AudioDevice { Id: "missing-test-mic", Unavailable: true }, "window preserves disconnected microphone selection");
         Finish(window.ToggleListening());
         Assert(!window.IsListening && Preferences.Load(path).DeviceId == "missing-test-mic", "an unavailable microphone cannot open audio or overwrite the chosen endpoint");
-        Assert(window.FormBorderStyle == FormBorderStyle.Sizable && window.MaximizeBox, "main window supports resizing and maximizing");
+        Assert(window.FormBorderStyle == FormBorderStyle.FixedSingle && !window.MaximizeBox && window.MinimizeBox,
+            "main window prevents manual resizing and maximizing while retaining minimize-to-tray");
         var meter = Descendants(window).OfType<ProgressBar>().Single();
         _ = meter.Handle;
         meter.Value = 72;
@@ -549,11 +550,10 @@ internal static partial class Checks
             window.Show();
             window.Enabled = true;
             Application.DoEvents();
-            if (narrow)
-                window.Width = window.MinimumSize.Width;
             if (settingsExpanded)
                 Descendants(window).OfType<Button>().Single(button => button.Text == "Show devices, startup and schedule").PerformClick();
-            window.FitWindow(true);
+            Rectangle area = Screen.FromControl(window).WorkingArea;
+            window.FitWindow(narrow ? new Rectangle(area.Location, new Size(Math.Min(460, area.Width), area.Height)) : area);
             using var bitmap = new Bitmap(window.Width, window.Height);
             window.DrawToBitmap(bitmap, new Rectangle(Point.Empty, window.Size));
             bitmap.Save(imagePath);

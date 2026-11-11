@@ -320,8 +320,8 @@ internal sealed partial class MainWindow : Form
     {
         showRequested = true;
         Show();
-        WindowState = restoredWindowState;
-        FitWindow(false);
+        WindowState = FormWindowState.Normal;
+        FitWindow();
         Activate();
         RefreshStartup();
     }
@@ -341,7 +341,7 @@ internal sealed partial class MainWindow : Form
             notice.Hide();
             footer.Text = "Original settings backed up to " + backup + ". Choose your microphone before starting.";
             UpdateListeningControls(DateTime.Now);
-            FitWindow(true);
+            FitWindow();
         }
         catch (Exception error) { MessageBox.Show(this, "Your original settings were kept. " + error.Message, "Settings recovery"); }
     }

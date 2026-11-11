@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace LittleQuieter;
 
@@ -22,59 +23,66 @@ internal static partial class Checks
             Application.DoEvents();
             var scroll = window.Controls.OfType<Panel>().Single();
             var toggle = Descendants(window).OfType<Button>().Single(button => button.Text == "Show devices, startup and schedule");
-            int compactHeight = window.Height;
+            Size compactSize = window.Size;
+            Assert(window.MinimumSize == compactSize && window.MaximumSize == compactSize,
+                "the compact window locks its size to the fitted content");
+            Assert((GetWindowLongPtr(window.Handle, -16).ToInt64() & (0x00040000L | 0x00010000L)) == 0,
+                "native window styles disable border resizing and maximization");
+            window.Size = new Size(2000, 1800);
+            Assert(window.Size == compactSize, "an oversized window request is capped at the fitted content size");
+            window.Size = new Size(100, 100);
+            Assert(window.Size == compactSize, "an undersized window request cannot hide the main controls");
             toggle.PerformClick();
             window.PerformLayout();
             Rectangle workArea = Screen.FromControl(window).WorkingArea;
-            Assert(window.Height >= compactHeight && workArea.Contains(window.Bounds) &&
+            Assert(window.Height >= compactSize.Height && workArea.Contains(window.Bounds) &&
                 (!scroll.VerticalScroll.Visible || window.Height == workArea.Height),
                 "expanding settings fits the available screen height and scrolls when constrained");
+            Size expandedSize = window.Size;
+            Assert(window.MinimumSize == expandedSize && window.MaximumSize == expandedSize,
+                "expanding settings updates both size limits to the new content");
             toggle.PerformClick();
-            Assert(window.Height == compactHeight && !scroll.VerticalScroll.Visible,
+            Assert(window.Size == compactSize && !scroll.VerticalScroll.Visible,
                 "collapsing settings restores the compact height without a stale scrollbar");
-            window.Size = window.MinimumSize;
             var primary = Descendants(window).OfType<Button>().Where(button => button.Text is "Start listening" or "Learn my normal voice" or "Test tone (2s)");
             Assert(primary.All(button => scroll.ClientRectangle.Contains(scroll.RectangleToClient(button.RectangleToScreen(button.ClientRectangle)))),
-                "the minimum window size keeps all main action buttons in view");
-            foreach (int width in new[] { 1000, 460, 800, 460 })
-            {
-                window.Width = width;
-                window.PerformLayout();
-                Assert(!scroll.HorizontalScroll.Visible && Descendants(window).OfType<FlowLayoutPanel>().Where(flow => flow.Visible)
-                    .All(flow => flow.Controls.Cast<Control>().Where(control => control.Visible).All(control => flow.ClientRectangle.Contains(control.Bounds))),
-                    "resizing to width " + width + " keeps grouped controls inside their rows");
-            }
+                "the fitted window keeps all main action buttons in view");
             var smallScreen = new Rectangle(100, 150, 360, 300);
             window.Location = new Point(-5000, -5000);
-            window.FitWindow(false, smallScreen);
+            window.FitWindow(smallScreen);
             Assert(smallScreen.Contains(window.Bounds) && scroll.VerticalScroll.Visible,
-                "a small work area overrides the normal minimum and keeps the entire window reachable");
+                "a small work area limits the fitted window and keeps it reachable");
             var last = Descendants(window).OfType<Label>().Single(label => label.Text.StartsWith("Minimize to keep listening"));
             toggle.PerformClick();
-            window.FitWindow(false, smallScreen);
+            window.FitWindow(smallScreen);
             scroll.ScrollControlIntoView(last);
             Assert(scroll.ClientRectangle.Contains(scroll.RectangleToClient(last.RectangleToScreen(last.ClientRectangle))),
                 "scrolling a small window can reach the final settings and footer");
-            window.FitWindow(true);
+            window.FitWindow();
+            Assert(window.Size == expandedSize,
+                "returning to a larger screen restores the natural content size");
             using var largeFont = new Font(window.Font.FontFamily, window.Font.Size * 1.5f);
             window.Font = largeFont;
-            window.FitWindow(true);
+            window.FitWindow();
             Assert(Screen.FromControl(window).WorkingArea.Contains(window.Bounds) && !scroll.HorizontalScroll.Visible && primary
                 .All(button => button.Parent!.ClientRectangle.Contains(button.Bounds)),
                 "larger control text fits without clipping actions or extending beyond the screen");
             window.Enabled = false;
-            window.WindowState = FormWindowState.Maximized;
+            Size beforeMinimizing = window.Size;
             window.WindowState = FormWindowState.Minimized;
             InvokeMonitor(window, "RestoreWindow");
-            Assert(window.WindowState == FormWindowState.Maximized,
-                "restoring from the tray preserves a maximized window");
+            Assert(window.WindowState == FormWindowState.Normal && window.Size == beforeMinimizing,
+                "restoring from the tray keeps the window fitted to its content");
             typeof(Button).GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(toggle, new object[] { EventArgs.Empty });
-            Assert(window.WindowState == FormWindowState.Maximized,
-                "toggling settings in a maximized window preserves its state");
+            Assert(window.MinimumSize == window.Size && window.MaximumSize == window.Size,
+                "toggling settings after a tray restore retains the fixed size limits");
             CloseWindow(window);
         }
         finally { File.Delete(path); Directory.Delete(folder); }
     }
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
 
     private static void CheckVolumeEditing()
     {

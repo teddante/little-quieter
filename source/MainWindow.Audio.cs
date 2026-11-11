@@ -325,7 +325,9 @@ internal sealed partial class MainWindow
             soundFailed = false;
         }
         ConfigureGate();
-        return ChangeAudio(SynchronizeOutput);
+        bool needed = input != null && AutomaticTone || gate.IsPreviewing(AudioClock.Now);
+        return (needed ? !alarm.IsReady || soundFailed : alarm.HasOutput)
+            ? ChangeAudio(SynchronizeOutput) : Task.CompletedTask;
     }
 
     internal async Task PauseAfterError()

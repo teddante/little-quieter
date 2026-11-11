@@ -548,10 +548,12 @@ internal static partial class Checks
             window.ShowInTaskbar = false;
             window.Show();
             window.Enabled = true;
-            window.ClientSize = new Size(narrow ? 420 : 620, settingsExpanded ? 980 : 540);
+            Application.DoEvents();
+            if (narrow)
+                window.Width = window.MinimumSize.Width;
             if (settingsExpanded)
                 Descendants(window).OfType<Button>().Single(button => button.Text == "Show devices, startup and schedule").PerformClick();
-            window.PerformLayout();
+            window.FitWindow(true);
             using var bitmap = new Bitmap(window.Width, window.Height);
             window.DrawToBitmap(bitmap, new Rectangle(Point.Empty, window.Size));
             bitmap.Save(imagePath);

@@ -37,6 +37,7 @@ internal static partial class Checks
                 WindowChecks(() => CheckDisposedWindow(true));
                 WindowChecks(CheckVisualOnlyAudio);
                 WindowChecks(CheckEarlyBackgroundPauseAudio);
+                WindowChecks(CheckLiveVolumeEditing);
                 return 0;
             }
             if (args.Length > 0 && args[0] == "--running")
@@ -70,6 +71,8 @@ internal static partial class Checks
             WindowChecks(CheckReminderStability);
             WindowChecks(CheckLiveMeterAndTheme);
             WindowChecks(CheckWindowThemeState);
+            WindowChecks(CheckVolumeEditing);
+            WindowChecks(CheckWindowSizing);
             Console.WriteLine("All " + count + " checks passed.");
             return 0;
         }

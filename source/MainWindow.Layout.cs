@@ -15,9 +15,14 @@ internal sealed partial class MainWindow
     private readonly NotifyIcon tray;
     private readonly ToolStripMenuItem trayToggle, trayTest;
     private readonly System.Windows.Forms.Timer timer;
+    private readonly Panel scroll;
+    private readonly TableLayoutPanel content;
+    private readonly FlowLayoutPanel primaryActions;
+    private FormWindowState restoredWindowState = FormWindowState.Normal;
 
     public MainWindow(bool startInBackground, EventWaitHandle show, EventWaitHandle exit, string? preferencesPath = null, DateTime? pausedForUpdateAt = null)
     {
+        SuspendLayout();
         background = startInBackground;
         showSignal = show;
         exitSignal = exit;
@@ -33,10 +38,10 @@ internal sealed partial class MainWindow
         AutoScaleDimensions = new SizeF(96, 96);
         AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(620, 540);
-        MinimumSize = new Size(400, 400);
+        MinimumSize = new Size(460, 520);
         StartPosition = FormStartPosition.CenterScreen;
-        var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(20) };
-        var content = Column();
+        scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(20) };
+        content = Column();
         scroll.Controls.Add(content);
         Controls.Add(scroll);
         var recovery = Column();
@@ -72,6 +77,7 @@ internal sealed partial class MainWindow
             settingsExpanded = !settingsExpanded;
             settings.Visible = settingsExpanded;
             settingsToggle.Text = settingsExpanded ? "Hide devices, startup and schedule" : "Show devices, startup and schedule";
+            FitWindow(true);
         };
         AddRow(settings, Caption("Microphone", true));
         microphones = DevicePicker("Microphone");
@@ -93,11 +99,14 @@ internal sealed partial class MainWindow
         learn.Click += async (_, _) => await ToggleCalibration();
         test = ActionButton("Test tone (2s)");
         test.Click += async (_, _) => await PreviewAlarm();
-        AddRow(content, Actions(start, learn, test));
+        primaryActions = Actions(start, learn, test);
+        AddRow(content, primaryActions);
         playTone = Option("Play steady alarm tone", preferences.PlayTone);
         showReminder = Option("Show visual reminder", preferences.ShowReminder);
         toneVolume = new ThemeNumericUpDown { Width = 80, Minimum = 0, Maximum = 100, Value = preferences.ToneVolume, Increment = 5, AccessibleName = "Alarm tone volume percent" };
-        AddRow(content, Actions(playTone, Caption("Volume (%)"), toneVolume));
+        var volumeControls = Actions(Caption("Volume (%)"), toneVolume);
+        volumeControls.WrapContents = false;
+        AddRow(content, Actions(playTone, volumeControls));
         AddRow(content, showReminder);
         runAtStartup = Option("Request startup with Windows", false);
         startupSettings = new LinkLabel
@@ -137,7 +146,13 @@ internal sealed partial class MainWindow
         menu.Items.Add("Exit", null, (_, _) => Close());
         tray = new NotifyIcon { Text = "Little Quieter — paused", Icon = Icon, ContextMenuStrip = menu, Visible = true };
         tray.DoubleClick += (_, _) => RestoreWindow();
-        Resize += (_, _) => { if (WindowState == FormWindowState.Minimized) Hide(); };
+        Resize += (_, _) =>
+        {
+            if (WindowState == FormWindowState.Minimized)
+                Hide();
+            else
+                restoredWindowState = WindowState;
+        };
         FormClosing += async (_, e) =>
         {
             if (closing)
@@ -155,12 +170,8 @@ internal sealed partial class MainWindow
                 Close();
             }
         };
-        Shown += (_, _) =>
-        {
-            Rectangle area = Screen.FromControl(this).WorkingArea;
-            Size = new Size(Math.Min(Width, area.Width - 24), Math.Min(Height, area.Height - 24));
-            Location = new Point(Math.Clamp(Left, area.Left, Math.Max(area.Left, area.Right - Width)), Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - Height)));
-        };
+        Shown += (_, _) => FitWindow(true);
+        DpiChanged += (_, _) => BeginInvoke(() => { if (!closing) FitWindow(false); });
         timer = new System.Windows.Forms.Timer { Interval = 100 };
         timer.Tick += async (_, _) => await TickMonitor();
         timer.Start();
@@ -190,6 +201,29 @@ internal sealed partial class MainWindow
         if (pauseAfterUpdate)
             dailySchedule.Update(scheduleEnabled.Checked, StartMinute, EndMinute, launchTime);
         UpdateListeningControls(DateTime.Now);
+        ResumeLayout(true);
+    }
+
+    internal void FitWindow(bool fitContent, Rectangle? workingArea = null)
+    {
+        Rectangle area = workingArea ?? Screen.FromControl(this).WorkingArea;
+        int width = Math.Max(LogicalToDeviceUnits(444), primaryActions.PreferredSize.Width + scroll.Padding.Horizontal + SystemInformation.VerticalScrollBarWidth);
+        Size minimum = SizeFromClientSize(new Size(width, LogicalToDeviceUnits(480)));
+        MinimumSize = new Size(Math.Min(minimum.Width, area.Width), Math.Min(minimum.Height, area.Height));
+        if (WindowState != FormWindowState.Normal)
+            return;
+        Width = Math.Clamp(Width, MinimumSize.Width, area.Width);
+        if (fitContent)
+        {
+            scroll.AutoScrollPosition = Point.Empty;
+            content.PerformLayout();
+            int height = SizeFromClientSize(new Size(ClientSize.Width,
+                content.GetPreferredSize(new Size(content.Width, 0)).Height + scroll.Padding.Vertical)).Height;
+            Height = Math.Clamp(height, MinimumSize.Height, area.Height);
+        }
+        else
+            Height = Math.Clamp(Height, MinimumSize.Height, area.Height);
+        Location = new Point(Math.Clamp(Left, area.Left, area.Right - Width), Math.Clamp(Top, area.Top, area.Bottom - Height));
     }
     protected override void SetVisibleCore(bool value)
     {
@@ -227,7 +261,12 @@ internal sealed partial class MainWindow
     private static ComboBox DevicePicker(string name) => new ThemeComboBox { Dock = DockStyle.Top, DropDownWidth = 550, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = name };
     private static FlowLayoutPanel Actions(params Control[] controls)
     {
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Margin = Padding.Empty };
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, Margin = Padding.Empty };
+        foreach (var control in controls)
+        {
+            control.Dock = DockStyle.None;
+            control.Anchor = AnchorStyles.Left;
+        }
         flow.Controls.AddRange(controls);
         return flow;
     }

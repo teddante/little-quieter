@@ -6,6 +6,7 @@ internal sealed class ReminderWindow : Form
     public event Action? Dismissed;
     public ReminderWindow()
     {
+        SuspendLayout();
         Text = "Little Quieter reminder";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = MinimizeBox = false;
@@ -35,6 +36,7 @@ internal sealed class ReminderWindow : Form
                 Dismiss();
             }
         };
+        ResumeLayout(true);
     }
     // Avoid stealing focus, while remaining reachable through the taskbar and Alt+Tab.
     protected override bool ShowWithoutActivation => true;

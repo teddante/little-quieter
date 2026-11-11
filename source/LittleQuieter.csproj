@@ -7,7 +7,6 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>LittleQuieter.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <ApplicationDefaultFont>Segoe UI, 10pt</ApplicationDefaultFont>
     <Version>1.5.2</Version>
     <Description>Local microphone loudness monitor with a steady alarm tone.</Description>
     <DebugType>none</DebugType>
@@ -15,5 +14,6 @@
   <ItemGroup>
     <PackageReference Include="NAudio.Wasapi" Version="3.3.0" />
     <EmbeddedResource Include="Uninstall.ps1" LogicalName="LittleQuieter.Uninstall.ps1" />
+    <EmbeddedResource Include="..\THIRD-PARTY-NOTICES.txt" LogicalName="LittleQuieter.THIRD-PARTY-NOTICES.txt" />
   </ItemGroup>
 </Project>

@@ -3,6 +3,7 @@ namespace LittleQuieter;
 internal sealed class ReminderWindow : Form
 {
     private readonly Label message;
+    public event Action? Dismissed;
     public ReminderWindow()
     {
         Text = "Little Quieter reminder";
@@ -19,8 +20,8 @@ internal sealed class ReminderWindow : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         message = new Label { AutoSize = true, Dock = DockStyle.Fill, Font = new Font(Font, FontStyle.Bold) };
-        var dismiss = new Button { Text = "&Dismiss", AutoSize = true, Anchor = AnchorStyles.Right, AccessibleName = "Dismiss reminder", DialogResult = DialogResult.Cancel };
-        dismiss.Click += (_, _) => Hide();
+        var dismiss = new ThemeButton { Text = "&Dismiss", AutoSize = true, Anchor = AnchorStyles.Right, AccessibleName = "Dismiss reminder", DialogResult = DialogResult.Cancel };
+        dismiss.Click += (_, _) => Dismiss();
         CancelButton = dismiss;
         AcceptButton = dismiss;
         layout.Controls.Add(message, 0, 0);
@@ -31,15 +32,27 @@ internal sealed class ReminderWindow : Form
             if (e.CloseReason == CloseReason.UserClosing)
             {
                 e.Cancel = true;
-                Hide();
+                Dismiss();
             }
         };
     }
     // Avoid stealing focus, while remaining reachable through the taskbar and Alt+Tab.
     protected override bool ShowWithoutActivation => true;
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        WindowTheme.ApplyTitle(this);
+    }
+    private void Dismiss()
+    {
+        Hide();
+        Dismissed?.Invoke();
+    }
     public void Remind(Form parent, string text)
     {
         message.Text = text;
+        if (Visible)
+            return;
         Rectangle area = Screen.FromControl(parent).WorkingArea;
         Location = new Point(Math.Max(area.Left, area.Right - Width - 24), area.Top + 24);
         Show();

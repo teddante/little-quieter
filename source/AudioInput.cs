@@ -32,52 +32,50 @@ internal sealed class AudioInput : IDisposable
             throw new InvalidOperationException("This input has already been used.");
         try
         {
-            Task.Run(() =>
+            using var enumerator = new MMDeviceEnumerator();
+            endpoint = deviceId == null ? enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console) : enumerator.GetDevice(deviceId);
+            var capture = new WasapiRecorderBuilder().WithDevice(endpoint).WithSharedMode().WithEventSync()
+                .WithBufferLength(10).WithLowLatency().WithMmcssThreadPriority("Audio").Build();
+            recorder = capture;
+            var analysis = new MicrophoneAnalyzer(capture.WaveFormat);
+            analyzer = analysis;
+            analysis.LevelAvailable += PublishFrame;
+            capture.DataAvailable += (buffer, flags, _, _) =>
             {
-                using var enumerator = new MMDeviceEnumerator();
-                endpoint = deviceId == null ? enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console) : enumerator.GetDevice(deviceId);
-                var capture = new WasapiRecorderBuilder().WithDevice(endpoint).WithSharedMode().WithEventSync()
-                    .WithBufferLength(10).WithLowLatency().WithMmcssThreadPriority("Audio").Build();
-                recorder = capture;
-                var analysis = new MicrophoneAnalyzer(capture.WaveFormat);
-                analyzer = analysis;
-                analysis.LevelAvailable += frame =>
-                {
-                    LevelAvailable?.Invoke(frame); // Direct gate control precedes optional UI summaries.
-                    displayClipped |= frame.Clipped;
-                    if (++displayWindows < WindowsPerSummary)
-                        return; // 20 summaries/second, not 200 gate decisions.
-                    frames.Enqueue(frame with
-                    {
-                        Clipped = displayClipped
-                    });
-                    displayWindows = 0;
-                    displayClipped = false;
-                    while (frames.Count > MaximumQueuedSummaries)
-                        frames.TryDequeue(out _);
-                };
-                capture.DataAvailable += (buffer, flags, _, _) =>
-                {
-                    if (disposed)
-                        return;
-                    if ((flags & AudioClientBufferFlags.DataDiscontinuity) != 0)
-                        analysis.Reset();
-                    analysis.Process(buffer, AudioClock.Now);
-                };
-                capture.RecordingStopped += (_, e) =>
-                {
-                    if (!disposed)
-                        fault = e.Exception ?? new InvalidOperationException("The microphone stream stopped.");
-                    StreamStopped?.Invoke();
-                };
-                capture.StartRecording();
-            }).GetAwaiter().GetResult();
+                if (disposed)
+                    return;
+                if ((flags & AudioClientBufferFlags.DataDiscontinuity) != 0)
+                    analysis.Reset();
+                analysis.Process(buffer, AudioClock.Now);
+            };
+            capture.RecordingStopped += (_, e) =>
+            {
+                if (!disposed)
+                    fault = e.Exception ?? new InvalidOperationException("The microphone stream stopped.");
+                StreamStopped?.Invoke();
+            };
+            capture.StartRecording();
         }
         catch
         {
             Dispose();
             throw;
         }
+    }
+    internal void PublishFrame(SoundFrame frame)
+    {
+        LevelAvailable?.Invoke(frame); // Direct gate control precedes optional UI summaries.
+        displayClipped |= frame.Clipped;
+        if (++displayWindows < WindowsPerSummary)
+            return; // 20 summaries/second, not 200 gate decisions.
+        frames.Enqueue(frame with
+        {
+            Clipped = displayClipped
+        });
+        displayWindows = 0;
+        displayClipped = false;
+        while (frames.Count > MaximumQueuedSummaries)
+            frames.TryDequeue(out _);
     }
     public void Dispose()
     {

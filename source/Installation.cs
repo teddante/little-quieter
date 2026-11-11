@@ -5,7 +5,6 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Microsoft.Win32;
 using NAudio.CoreAudioApi;
-using NAudio.CoreAudioApi.Interfaces;
 
 namespace LittleQuieter;
 
@@ -19,6 +18,7 @@ internal static class Installation
 
     public static void Run(bool noLaunch)
     {
+        using var operation = new InstallationLock();
         string source = Environment.ProcessPath ?? throw new InvalidOperationException("Cannot locate the running executable.");
         bool updating = File.Exists(ProgramPath);
         using var running = FindRunning(ProgramPath);
@@ -72,15 +72,7 @@ internal static class Installation
     {
         try
         {
-            using var enumerator = new MMDeviceEnumerator();
-            foreach (var endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
-                using (endpoint)
-                {
-                    var sessions = endpoint.AudioSessionManager.Sessions;
-                    for (int i = 0; i < sessions.Count; i++)
-                        if (sessions[i].GetProcessID == processId && sessions[i].State == AudioSessionState.AudioSessionStateActive)
-                            return true;
-                }
+            return AudioDevice.HasActiveSession(DataFlow.Capture, processId);
         }
         catch (Exception error) when (error is COMException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -118,6 +110,7 @@ internal static class Installation
     // Explicit destinations keep integration checks isolated from the installed app.
     internal static void Install(string source, string folder, string shortcutPath, string uninstallKey, Action? beforeReplace = null)
     {
+        using var operation = new InstallationLock();
         string program = Path.Combine(folder, "Little Quieter.exe");
         Directory.CreateDirectory(folder);
         string staging = Path.Combine(folder, ".install-" + Guid.NewGuid().ToString("N"));
@@ -139,20 +132,17 @@ internal static class Installation
                 files.Add((staged, program));
                 originals.Add(program + ".previous", File.Exists(program + ".previous") ? File.ReadAllBytes(program + ".previous") : null);
             }
-            string scriptPath = Path.Combine(staging, "uninstaller");
-            using (var script = Assembly.GetExecutingAssembly().GetManifestResourceStream("LittleQuieter.Uninstall.ps1")!)
-            using (var output = File.Create(scriptPath))
-                script.CopyTo(output);
-            files.Add((scriptPath, Path.Combine(folder, "Uninstall.ps1")));
-            string notices = Path.Combine(Path.GetDirectoryName(source)!, "THIRD-PARTY-NOTICES.txt");
-            if (File.Exists(notices))
+            foreach (string name in new[] { "Uninstall.ps1", "THIRD-PARTY-NOTICES.txt" })
             {
-                string staged = Path.Combine(staging, "notices");
-                File.Copy(notices, staged);
-                files.Add((staged, Path.Combine(folder, "THIRD-PARTY-NOTICES.txt")));
+                string staged = Path.Combine(staging, name);
+                using var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("LittleQuieter." + name)
+                    ?? throw new InvalidOperationException("Missing installation resource: " + name);
+                using (var output = File.Create(staged))
+                    resource.CopyTo(output);
+                files.Add((staged, Path.Combine(folder, name)));
             }
             string stagedShortcut = Path.Combine(staging, "shortcut.lnk");
-            CreateShortcut(stagedShortcut, program, folder);
+            ShellShortcut.Create(stagedShortcut, program, folder);
             files.Add((stagedShortcut, shortcutPath));
             foreach (var file in files)
                 originals.Add(file.Target, File.Exists(file.Target) ? File.ReadAllBytes(file.Target) : null);
@@ -245,33 +235,11 @@ internal static class Installation
         key.SetValue("DisplayVersion", Assembly.GetExecutingAssembly().GetName().Version!.ToString(3));
         key.SetValue("DisplayIcon", program);
         key.SetValue("InstallLocation", folder);
-        key.SetValue("UninstallString", $"\"{powershell}\" -NoProfile -WindowStyle Hidden -File \"{Path.Combine(folder, "Uninstall.ps1")}\"");
+        key.SetValue("UninstallString", $"\"{powershell}\" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{Path.Combine(folder, "Uninstall.ps1")}\"");
         key.SetValue("NoModify", 1, RegistryValueKind.DWord);
         key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
         key.SetValue("URLInfoAbout", "https://github.com/teddante/little-quieter");
         // Installation never writes settings or the Run/StartupApproved keys.
     }
 
-    private static void CreateShortcut(string path, string program, string folder)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        object shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", true)!)!;
-        object? shortcut = null;
-        try
-        {
-            dynamic automation = shell;
-            shortcut = automation.CreateShortcut(path);
-            dynamic link = shortcut;
-            link.TargetPath = program;
-            link.WorkingDirectory = folder;
-            link.Description = "Open Little Quieter microphone volume monitor";
-            link.Save();
-        }
-        finally
-        {
-            if (shortcut != null)
-                Marshal.FinalReleaseComObject(shortcut);
-            Marshal.FinalReleaseComObject(shell);
-        }
-    }
 }

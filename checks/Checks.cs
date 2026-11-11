@@ -24,7 +24,7 @@ internal static partial class Checks
             Application.SetColorMode(args.Contains("--dark") ? SystemColorMode.Dark : args.Contains("--preview") ? SystemColorMode.Classic : SystemColorMode.System);
             if (args.Length > 1 && args[0] == "--preview")
             {
-                WindowChecks(() => PreviewWindow(args[1]));
+                WindowChecks(() => PreviewWindow(args[1], args.Contains("--settings"), args.Contains("--narrow")));
                 return 0;
             }
             if (args.Length > 0 && args[0] == "--audio")
@@ -34,6 +34,9 @@ internal static partial class Checks
                 WindowChecks(CheckPreviewOutputChanges);
                 WindowChecks(CheckUpdatePauseAudio);
                 WindowChecks(CheckCalibrationAudio);
+                WindowChecks(() => CheckDisposedWindow(true));
+                WindowChecks(CheckVisualOnlyAudio);
+                WindowChecks(CheckEarlyBackgroundPauseAudio);
                 return 0;
             }
             if (args.Length > 0 && args[0] == "--running")
@@ -47,8 +50,11 @@ internal static partial class Checks
             if (args.Length > 0)
                 throw new ArgumentException("Unknown check option. Use --audio, --running, --endpoints, --clock-benchmark [report] [device], or --capture-timing [report].");
             GateChecks();
+            ReminderChecks();
+            StartupChecks();
             ToneChecks();
             AnalyzerChecks();
+            InputSummaryChecks();
             SettingsChecks();
             ScheduleChecks();
             DeviceSelectionChecks();
@@ -57,6 +63,13 @@ internal static partial class Checks
             WindowChecks();
             WindowChecks(RecoveryWindowCheck);
             WindowChecks(CheckUnavailableOutputs);
+            WindowChecks(() => CheckDisposedWindow(false));
+            WindowChecks(CheckShutdownSaveFailure);
+            WindowChecks(CheckUnchangedWindowSettings);
+            WindowChecks(CheckResponsiveAudioTransition);
+            WindowChecks(CheckReminderStability);
+            WindowChecks(CheckLiveMeterAndTheme);
+            WindowChecks(CheckWindowThemeState);
             Console.WriteLine("All " + count + " checks passed.");
             return 0;
         }
@@ -101,6 +114,11 @@ internal static partial class Checks
         gate.Suspend(false);
         gate.Update(new SoundFrame(-20, double.NaN, false));
         Assert(!output && !gate.Active, "an invalid input timestamp cannot latch the tone on");
+        gate.Configure(-28, false);
+        gate.Preview(AudioClock.Now);
+        Assert(output, "an explicit preview bypasses the automatic-alarm checkbox");
+        gate.CancelPreview();
+        Assert(!output && !gate.IsPreviewing(AudioClock.Now), "cancelling a preview immediately closes its sound gate");
         int writes = 0;
         var steady = new AlarmGate(_ => writes++);
         steady.Configure(-28, true);
@@ -265,6 +283,54 @@ internal static partial class Checks
         }
         Assert(GC.GetAllocatedBytesForCurrentThread() == allocated, "analysis, discontinuity resets, gating and tone generation allocate no managed memory");
     }
+    private static void InputSummaryChecks()
+    {
+        using var input = new AudioInput();
+        int callbacks = 0;
+        bool summaryBeforeCallback = false;
+        input.LevelAvailable += frame =>
+        {
+            if (++callbacks == 10)
+                summaryBeforeCallback = input.TryRead(out _);
+        };
+        for (int i = 0; i < 210; i++)
+            input.PublishFrame(new SoundFrame(-30, i, i == 10));
+        Assert(callbacks == 210 && !summaryBeforeCallback, "every analysis window reaches the alarm before display summarization");
+        Assert(input.TryRead(out var first) && first.Time == 19 && first.Clipped,
+            "a full display queue drops the oldest summary and retains clipping within each summary");
+        int summaries = 1;
+        SoundFrame last = first;
+        bool laterClipped = false;
+        while (input.TryRead(out var frame))
+        {
+            summaries++;
+            last = frame;
+            laterClipped |= frame.Clipped;
+        }
+        Assert(summaries == 20 && last.Time == 209 && !laterClipped,
+            "display summaries stay bounded, ordered and independent of earlier clipping");
+        var steady = new SoundFrame(-30, AudioClock.Now, false);
+        for (int i = 0; i < 1000; i++)
+        {
+            input.PublishFrame(steady);
+            input.TryRead(out _);
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 10000; i++)
+        {
+            input.PublishFrame(steady);
+            input.TryRead(out _);
+        }
+        Assert(GC.GetAllocatedBytesForCurrentThread() == allocated,
+            "audio callback display summaries allocate no managed memory while the UI consumes them");
+        for (int i = 0; i < 1000; i++)
+            input.PublishFrame(steady);
+        allocated = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 10000; i++)
+            input.PublishFrame(steady);
+        Assert(GC.GetAllocatedBytesForCurrentThread() == allocated,
+            "a stalled UI cannot cause audio callback display summaries to allocate");
+    }
     private static void SettingsChecks()
     {
         Assert(StartupRegistration.Command(@"C:\Program Files\Little Quieter.exe") == "\"C:\\Program Files\\Little Quieter.exe\" --background", "startup command quotes paths");
@@ -290,6 +356,21 @@ internal static partial class Checks
             loaded.Save(path);
             Assert(Preferences.Load(path).Limit == 95, "settings validate and replace atomically");
             Assert(Preferences.Load(path).OutputDeviceId == "explicit-test-device", "app-only output selection persists");
+            DateTime stamp = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(path, stamp);
+            loaded.Save(path);
+            Assert(File.GetLastWriteTimeUtc(path) == stamp, "saving identical settings keeps the original file timestamp");
+            byte[] beforeFailure = File.ReadAllBytes(path);
+            loaded.Limit = 50;
+            bool writeFailed = false;
+            using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                try
+                {
+                    loaded.Save(path);
+                }
+                catch (IOException) { writeFailed = true; }
+            Assert(writeFailed && File.ReadAllBytes(path).SequenceEqual(beforeFailure) && !File.Exists(path + ".tmp"),
+                "a failed atomic settings replacement preserves the original and removes its temporary file");
             File.WriteAllText(path, "broken XML");
             var damaged = Preferences.Load(path);
             Assert(damaged.NeedsRecovery && !damaged.PlayTone && damaged.ToneVolume == 0, "damaged preferences pause sound and require recovery");
@@ -408,7 +489,7 @@ internal static partial class Checks
                 Assert(!window.IsListening && Descendants(window).OfType<Label>().Any(label => label.Text.StartsWith("Choose different start")),
                     "equal schedule times clearly explain why listening stays off");
             }
-            finally { window.Close(); }
+            finally { CloseWindow(window); }
             Assert(Preferences.Load(path).OutputDeviceId == null, "window shutdown saves the selected default output");
             var scheduled = Preferences.Load(path);
             Assert(scheduled.ScheduleEnabled && scheduled.ScheduleStartMinute == scheduled.ScheduleEndMinute,
@@ -430,38 +511,28 @@ internal static partial class Checks
             using var exit = new EventWaitHandle(false, EventResetMode.AutoReset);
             using var window = new MainWindow(false, show, exit, path);
             _ = window.Handle;
+            // This check drives synthetic local times explicitly. Pumping async
+            // continuations must not also apply the real clock between assertions.
+            ((System.Windows.Forms.Timer)typeof(MainWindow).GetField("timer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(window)!).Stop();
             try
             {
-                window.ApplySchedule(now);
-                Assert(window.IsListening && HasActiveSession(NAudio.CoreAudioApi.DataFlow.Capture) && HasActiveSession(NAudio.CoreAudioApi.DataFlow.Render),
-                    "scheduled start opens the app's shared audio streams at zero test volume");
-                window.ToggleListening();
-                window.ApplySchedule(now);
+                Finish(window.ApplySchedule(now));
+                Assert(window.IsListening && AudioDevice.HasActiveSession(NAudio.CoreAudioApi.DataFlow.Capture) && !AudioDevice.HasActiveSession(NAudio.CoreAudioApi.DataFlow.Render),
+                    "scheduled listening at zero volume opens capture without an unnecessary output stream");
+                Finish(window.ToggleListening());
+                Finish(window.ApplySchedule(now));
                 Assert(!window.IsListening, "manual stop remains paused during the same scheduled period");
-                window.ToggleListening();
+                Finish(window.ToggleListening());
                 Assert(window.IsListening, "manual start can resume within the active period");
-                window.ApplySchedule(now.AddMinutes(4));
-                Assert(!window.IsListening && SpinWait.SpinUntil(() => !HasActiveSession(NAudio.CoreAudioApi.DataFlow.Capture) && !HasActiveSession(NAudio.CoreAudioApi.DataFlow.Render), 1500),
+                Finish(window.ApplySchedule(now.AddMinutes(4)));
+                Assert(!window.IsListening && SpinWait.SpinUntil(() => !AudioDevice.HasActiveSession(NAudio.CoreAudioApi.DataFlow.Capture) && !AudioDevice.HasActiveSession(NAudio.CoreAudioApi.DataFlow.Render), 1500),
                     "scheduled stop releases both capture and playback streams");
-                window.ApplySchedule(now);
+                Finish(window.ApplySchedule(now));
                 Assert(window.IsListening, "entering another active period reopens listening without changing devices");
             }
-            finally { window.Close(); }
+            finally { CloseWindow(window); }
         }
         finally { File.Delete(path); Directory.Delete(folder); }
-    }
-    private static bool HasActiveSession(NAudio.CoreAudioApi.DataFlow flow, int? processId = null)
-    {
-        using var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
-        foreach (var endpoint in enumerator.EnumerateAudioEndPoints(flow, NAudio.CoreAudioApi.DeviceState.Active))
-            using (endpoint)
-            {
-                var sessions = endpoint.AudioSessionManager.Sessions;
-                for (int i = 0; i < sessions.Count; i++)
-                    if (sessions[i].GetProcessID == (processId ?? Environment.ProcessId) && sessions[i].State == NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateActive)
-                        return true;
-            }
-        return false;
     }
     private static int AudioCheck()
     {
@@ -508,8 +579,8 @@ internal static partial class Checks
         Assert(app.Responding, "installed app is responsive");
         Console.WriteLine("Installed app window: " + (app.MainWindowHandle == IntPtr.Zero ? "hidden" : "open"));
         foreach (var flow in new[] { NAudio.CoreAudioApi.DataFlow.Capture, NAudio.CoreAudioApi.DataFlow.Render })
-            Console.WriteLine("Installed app " + flow + ": " + (HasActiveSession(flow, app.Id) ? "active" : "off"));
-        Console.WriteLine("Startup registered: " + StartupRegistration.Enabled);
+            Console.WriteLine("Installed app " + flow + ": " + (AudioDevice.HasActiveSession(flow, app.Id) ? "active" : "off"));
+        Console.WriteLine("Startup requested for installed copy: " + StartupRegistration.Matches(StartupRegistration.ReadCommand(), installed));
         return 0;
     }
 }

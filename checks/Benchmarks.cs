@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using NAudio.CoreAudioApi;
@@ -15,7 +14,8 @@ internal static class Benchmarks
         {
             using var selected = enumerator.GetDefaultAudioEndpoint(flow, Role.Console);
             Console.WriteLine(flow + " default: " + selected.FriendlyName);
-            foreach (var device in enumerator.EnumerateAudioEndPoints(flow, DeviceState.Active))
+            using var devices = enumerator.EnumerateAudioEndPoints(flow, DeviceState.Active);
+            foreach (var device in devices)
                 using (device)
                     Console.WriteLine(device.FriendlyName + " | " + device.ID);
         }
@@ -124,10 +124,8 @@ internal static class Benchmarks
         var trace = tracedSource ?? throw new InvalidOperationException("The output trace was not initialized.");
         var format = tone.Format ?? throw new InvalidOperationException("The output format is unavailable.");
         var player = tone.Player;
-        // NAudio exposes no public endpoint-clock client. Keep this version-specific
-        // diagnostic access out of the application's rendering and capture paths.
-        var client = typeof(WasapiPlayer).GetField("audioClient", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(player) as AudioClient
-            ?? throw new NotSupportedException("The installed NAudio player does not expose the expected diagnostic clock field.");
+        var outputFormat = player.OutputWaveFormat;
+        double queuedMilliseconds = player.CurrentLatency.TotalMilliseconds;
         bool previousMute = player.IsMuted;
         player.IsMuted = true;
         if (!player.IsMuted)
@@ -136,17 +134,19 @@ internal static class Benchmarks
         var commands = new List<Command>();
         using var stop = new ManualResetEvent(false);
         Exception? clockFailure = null;
+        double longestPositionRead = 0;
         var reader = new Thread(() =>
         {
             try
             {
-                var clock = client.AudioClockClient;
-                double frequency = clock.Frequency;
                 while (!stop.WaitOne(2))
                 {
-                    clock.GetPosition(out ulong position, out ulong qpc);
-                    if (position > 0 && qpc > 0)
-                        clockPoints.Add(new ClockPoint(position / frequency * format.SampleRate, qpc / 1e7));
+                    double before = AudioClock.Now;
+                    long position = player.GetPosition(); // Public endpoint-clock position, expressed in output bytes.
+                    double after = AudioClock.Now;
+                    longestPositionRead = Math.Max(longestPositionRead, after - before);
+                    if (position > 0)
+                        clockPoints.Add(new ClockPoint(position / (double)outputFormat.BlockAlign, (before + after) / 2));
                 }
             }
             catch (Exception error) { clockFailure = error; }
@@ -220,12 +220,11 @@ internal static class Benchmarks
             }
             var report = new
             {
-                Method = "Actual production tone generator and WASAPI pipeline, test-process session muted, generated markers mapped onto IAudioClock endpoint positions",
+                Method = "Production tone and WASAPI pipeline, test-process session muted; public GetPosition byte positions paired with midpoint QPC read times",
                 OutputLowLatency = tone.LowLatency,
                 OutputReportedEngineMs = tone.EngineMilliseconds,
-                OutputBufferFrames = client.BufferSize,
-                OutputBufferMs = client.BufferSize * 1000.0 / format.SampleRate,
-                ReportedStreamLatencyRaw = client.StreamLatency,
+                OutputQueuedMsAtStart = queuedMilliseconds,
+                LongestPositionReadMs = longestPositionRead * 1000,
                 DetectionBucketMs = 1,
                 OutputDeviceName = player.DeviceFriendlyName,
                 RenderReadGapMinMedianP95MaxMs = Summary(trace.ReadTimes.Skip(1).Select((time, i) => (time - trace.ReadTimes[i]) * 1000)),
@@ -238,10 +237,10 @@ internal static class Benchmarks
                 StopGenerationMinMedianP95MaxMs = Summary(generatedStops),
                 ClockReadings = clockPoints.Count,
                 Matches = matches,
-                Limitation = "Measures command-to-endpoint-clock presentation, with 1 ms signal buckets. Excludes microphone acoustic onset, downstream virtual-device routing, DAC/speaker/headphone/Bluetooth delay. No acoustic measurement."
+                Limitation = "Estimates command-to-endpoint-clock presentation using public position reads and 1 ms signal buckets. Includes position-query timing uncertainty. Excludes microphone onset, downstream routing and acoustic delay. Not directly comparable with older raw-QPC reports."
             };
             WriteReport(reportPath, report);
-            Console.WriteLine("Session muted; native endpoint buffer=" + report.OutputBufferMs.ToString("F2") + " ms, engine=" + report.OutputReportedEngineMs + " ms; markers=" + matches.Count + "/" + commands.Count);
+            Console.WriteLine("Session muted; engine=" + report.OutputReportedEngineMs + " ms; position read max=" + report.LongestPositionReadMs.ToString("F3") + " ms; markers=" + matches.Count + "/" + commands.Count);
             Console.WriteLine("Endpoint-clock start min/median/p95/max ms: " + String.Join(", ", report.StartMinMedianP95MaxMs.Select(x => x.ToString("F2"))));
             Console.WriteLine("Endpoint-clock stop min/median/p95/max ms: " + String.Join(", ", report.StopMinMedianP95MaxMs.Select(x => x.ToString("F2"))));
             Console.WriteLine("Source-generation start median ms: " + report.StartGenerationMinMedianP95MaxMs.ElementAtOrDefault(1).ToString("F2"));

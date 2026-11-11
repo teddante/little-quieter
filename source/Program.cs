@@ -38,11 +38,27 @@ internal static class Program
         }
         if (exit)
             return 0;
-        Application.ThreadException += (_, e) =>
-            MessageBox.Show("Something went wrong. Stop and restart Little Quieter.\n\n" + e.Exception.Message, "Little Quieter");
         using var showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\LittleQuieter.Show.v1");
         using var exitSignal = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\LittleQuieter.Exit.v1");
         using var main = new MainWindow(background, showSignal, exitSignal, pausedForUpdateAt: Installation.ReadPauseTime(args));
+        bool handlingError = false;
+        Application.ThreadException += async (_, e) =>
+        {
+            if (handlingError)
+                return;
+            handlingError = true;
+            try
+            {
+                try
+                {
+                    await main.PauseAfterError();
+                }
+                catch { } // Pausing silences and detaches devices before waiting for cleanup.
+                if (!main.IsDisposed)
+                    MessageBox.Show(main, "Listening has been paused after an error.\n\n" + e.Exception.Message, "Little Quieter");
+            }
+            finally { handlingError = false; }
+        };
         // A hidden top-level handle receives Windows shutdown messages too.
         _ = main.Handle;
         Application.Run(main);

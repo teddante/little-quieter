@@ -77,12 +77,28 @@ public sealed class Preferences
         string? directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
+        using var serialized = new MemoryStream();
+        Serializer.Serialize(serialized, this);
+        byte[] contents = serialized.ToArray();
+        if (File.Exists(path) && File.ReadAllBytes(path).SequenceEqual(contents))
+            return;
         string temporary = path + ".tmp";
-        using (var output = File.Create(temporary))
-            Serializer.Serialize(output, this);
-        if (File.Exists(path))
-            File.Replace(temporary, path, null);
-        else
-            File.Move(temporary, path);
+        try
+        {
+            File.WriteAllBytes(temporary, contents);
+            if (File.Exists(path))
+                File.Replace(temporary, path, null);
+            else
+                File.Move(temporary, path);
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(temporary);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 }

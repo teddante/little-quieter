@@ -12,11 +12,15 @@ Requires **Windows 11 x64** and the [**.NET 10 Desktop Runtime**](https://dotnet
 2. Double-click **Little Quieter Setup.exe**. It installs for your account, adds a Start menu shortcut and registers removal in Windows **Settings → Apps → Installed apps**. Updates preserve your settings and startup choice. `Install.ps1` remains available for command-line use.
 3. New installations open visibly with listening paused and startup off. Choose your microphone, click **Learn my normal voice**, then **Start listening**. Adjust **Loudness limit** as needed: lower warns sooner. Enable startup when you want it.
 
-Minimize to keep listening; double-click the tray icon to reopen. Closing the window exits. Use the startup checkbox to control automatic listening after sign-in.
+Minimize to keep listening; double-click the tray icon to reopen. Closing the window exits. Expand **Show devices, startup and schedule** for microphone/output selection and automatic listening options.
+
+**Request startup with Windows** registers this copy to listen in the tray after sign-in, subject to your schedule. Windows can disable that request independently; the adjacent link opens Windows Startup apps. An entry pointing to another copy is identified without changing it automatically.
 
 Updates keep a running app listening or paused as it was, without changing your Windows startup choice. A scheduled pause lasts until the next daily period. If the app was closed, an update leaves it closed. Files are staged before the running app exits; a failed replacement restores the previous files and app registration. When upgrading a paused version older than 1.5.1, a failure leaves the restored app closed because those versions cannot accept a paused restart.
 
-The window resizes and uses the Windows light/dark colour mode selected when the app starts. Standard controls support high-contrast colours and keyboard navigation. The live meter exposes its value to assistive technology. **Show visual reminder** controls the separate reminder window; it does not stay on top or steal focus. Use its Dismiss button, Escape, or the tray menu to dismiss it.
+The resizable window follows Windows light/dark changes while running and supports high-contrast colours and keyboard navigation. The live meter paints level changes immediately, marks the warning limit and exposes its value to assistive technology. **Show visual reminder** controls the separate reminder window; it does not stay on top or steal focus. Brief quiet gaps keep the same reminder open; half a second of quiet closes and rearms it. Dismiss, Escape and the tray menu suppress the current warning episode.
+
+**Test tone (2s)** explicitly previews the selected output at the chosen volume, even when automatic tones or scheduled listening are off. It never opens the microphone. At 0% volume it stays silent. Visual-only listening and voice learning open no output stream; automatic tone playback keeps its output ready only while enabled at a nonzero volume.
 
 Explicit microphone selections use endpoint IDs. A disconnected microphone stays selected as unavailable; the app pauses instead of opening another microphone. Old name-only selections migrate when their names match exactly one device.
 
@@ -24,7 +28,7 @@ Unavailable alarm outputs also stay selected without falling back to Windows def
 
 Only changes to a Windows default device that you actually selected restart monitoring. Changing the alarm output while a preview is playing cancels it immediately; the next test uses the new output. Reminder windows allow Windows shutdown and sign-out normally.
 
-For automatic hours, choose **From** and **to**, then enable **Listen on a daily schedule**. It is off by default. Times use your PC's local clock and repeat every day; overnight ranges such as 22:00–07:00 work. Outside those hours, the microphone and alarm streams close. Equal start/end times keep listening off until you choose different times. Keep the app running in the tray; it does not wake a sleeping PC. **Stop listening** pauses the current scheduled period; the next period resumes automatically, or you can start listening again yourself.
+For automatic hours, choose **From** and **to**, then enable **Listen on a daily schedule**. It is off by default. Times use your PC's local clock and repeat every day; overnight ranges such as 22:00–07:00 work. Outside those hours automatic listening closes its streams; explicit tone testing remains available. Equal start/end times keep listening off until you choose different times. Keep the app running in the tray; it does not wake a sleeping PC. **Stop listening** pauses the current scheduled period; the next period resumes automatically, or you can start listening again yourself. An unexpected application error silences and pauses listening until you explicitly resume.
 
 **Alarm output** affects only this app. Stop listening before changing devices. Windows audio and other apps keep their settings. Start with a low alarm volume, especially with headphones.
 
@@ -36,7 +40,7 @@ Settings: `%LOCALAPPDATA%\LittleQuieter\settings.xml`. Installation: `%LOCALAPPD
 
 If settings cannot be read, the app pauses and preserves the original file. Repair it and restart, or choose **Back up and use new settings** to keep an exact backup before replacing it. Recovery starts with sound off.
 
-To uninstall, use Windows **Settings → Apps → Installed apps → Little Quieter → Uninstall**. The local removal script closes only this app, removes its files, shortcut and registration, and keeps personal settings. It uses Windows PowerShell without changing execution policy. `Install.ps1 -WhatIf` previews installation without making changes.
+To uninstall, use Windows **Settings → Apps → Installed apps → Little Quieter → Uninstall**. The local removal script closes only this app, removes its files, shortcut and registration, and keeps personal settings. Windows PowerShell allows this bundled script for the removal process only; saved execution policies remain unchanged. `Install.ps1 -WhatIf` previews installation without making changes.
 
 ## Build
 

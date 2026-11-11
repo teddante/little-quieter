@@ -18,6 +18,7 @@ internal sealed class AlarmTone : IDisposable
     public Exception? Fault => fault;
     public const int FrequencyHz = 2500;
     public bool IsReady => player?.PlaybackState == PlaybackState.Playing;
+    public bool HasOutput => player != null;
     public bool IsActive => source?.Active == true;
     public bool LowLatency => player?.LowLatencyActive == true;
     public int EngineMilliseconds => player?.LatencyMilliseconds ?? 0;
@@ -28,26 +29,23 @@ internal sealed class AlarmTone : IDisposable
         fault = null;
         try
         {
-            Task.Run(() =>
+            using var enumerator = new MMDeviceEnumerator();
+            endpoint = deviceId == null ? enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console) : enumerator.GetDevice(deviceId);
+            using var client = endpoint.CreateAudioClient();
+            var mix = client.MixFormat;
+            var prepared = new SteadyToneProvider(volume, mix.SampleRate, mix.Channels);
+            var output = new WasapiPlayerBuilder().WithDevice(endpoint).WithSharedMode().WithEventSync()
+                .WithLatency(10).WithLowLatency().WithMmcssThreadPriority("Audio").Build();
+            source = prepared;
+            player = output;
+            output.PlaybackStopped += (_, e) =>
             {
-                using var enumerator = new MMDeviceEnumerator();
-                endpoint = deviceId == null ? enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console) : enumerator.GetDevice(deviceId);
-                using var client = endpoint.CreateAudioClient();
-                var mix = client.MixFormat;
-                var prepared = new SteadyToneProvider(volume, mix.SampleRate, mix.Channels);
-                var output = new WasapiPlayerBuilder().WithDevice(endpoint).WithSharedMode().WithEventSync()
-                    .WithLatency(10).WithLowLatency().WithMmcssThreadPriority("Audio").Build();
-                source = prepared;
-                player = output;
-                output.PlaybackStopped += (_, e) =>
-                {
-                    prepared.SetActive(false);
-                    if (ReferenceEquals(player, output))
-                        fault = e.Exception ?? new InvalidOperationException("The alarm output stream stopped.");
-                };
-                output.Init(measurementDecorator == null ? prepared : measurementDecorator(prepared));
-                output.Play(); // Keep the engine ready; the provider emits silence until gated on.
-            }).GetAwaiter().GetResult();
+                prepared.SetActive(false);
+                if (ReferenceEquals(player, output))
+                    fault = e.Exception ?? new InvalidOperationException("The alarm output stream stopped.");
+            };
+            output.Init(measurementDecorator == null ? prepared : measurementDecorator(prepared));
+            output.Play(); // Keep the engine ready; the provider emits silence until gated on.
         }
         catch
         {
@@ -71,6 +69,7 @@ internal sealed class AlarmTone : IDisposable
         player = null; // Disposal is expected; its stopped event must not become a new fault.
         endpoint = null;
         source = null;
+        fault = null;
         try
         {
             output?.Dispose();

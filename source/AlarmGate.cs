@@ -60,6 +60,14 @@ internal sealed class AlarmGate
             Apply(now);
         }
     }
+    public void CancelPreview()
+    {
+        lock (sync)
+        {
+            previewUntil = 0;
+            Apply(AudioClock.Now);
+        }
+    }
     public bool IsPreviewing(double now)
     {
         lock (sync)
@@ -85,7 +93,7 @@ internal sealed class AlarmGate
     }
     private void Apply(double now)
     {
-        SetOutput(enabled && !suspended && (active || previewUntil > now));
+        SetOutput(!suspended && (enabled && active || previewUntil > now));
     }
     private void SetOutput(bool value)
     {

@@ -1,4 +1,5 @@
 using NAudio.CoreAudioApi;
+using NAudio.CoreAudioApi.Interfaces;
 
 namespace LittleQuieter;
 
@@ -26,10 +27,30 @@ internal sealed class AudioDevice
     {
         var result = new List<AudioDevice> { new AudioDevice { Name = flow == DataFlow.Capture ? DefaultMicrophoneName : DefaultOutputName } };
         using var enumerator = new MMDeviceEnumerator();
-        foreach (var device in enumerator.EnumerateAudioEndPoints(flow, DeviceState.Active))
+        using var devices = enumerator.EnumerateAudioEndPoints(flow, DeviceState.Active);
+        foreach (var device in devices)
             using (device)
                 result.Add(new AudioDevice { Id = device.ID, Name = device.FriendlyName });
         return result;
+    }
+
+    public static bool HasActiveSession(DataFlow flow, int? processId = null)
+    {
+        int targetProcessId = processId ?? Environment.ProcessId;
+        using var enumerator = new MMDeviceEnumerator();
+        using var devices = enumerator.EnumerateAudioEndPoints(flow, DeviceState.Active);
+        foreach (var endpoint in devices)
+            using (endpoint)
+            {
+                var sessions = endpoint.AudioSessionManager.Sessions;
+                for (int i = 0; i < sessions.Count; i++)
+                {
+                    using var session = sessions[i];
+                    if (session.GetProcessID == targetProcessId && session.State == AudioSessionState.AudioSessionStateActive)
+                        return true;
+                }
+            }
+        return false;
     }
 }
 
@@ -38,6 +59,12 @@ internal sealed class AudioDeviceChanges : IDisposable
     private readonly MMDeviceEnumerator enumerator = new MMDeviceEnumerator();
     private readonly MMDeviceNotificationClient notifications;
     private int version;
+    private volatile bool followDefaultOutput;
+    public bool FollowDefaultOutput
+    {
+        get => followDefaultOutput;
+        set => followDefaultOutput = value;
+    }
     public int Version => Volatile.Read(ref version);
 
     internal static bool AffectsSelection(DataFlow flow, Role role, bool defaultInput, bool defaultOutput)
@@ -47,10 +74,11 @@ internal sealed class AudioDeviceChanges : IDisposable
 
     public AudioDeviceChanges(Action silence, bool defaultInput, bool defaultOutput)
     {
+        FollowDefaultOutput = defaultOutput;
         notifications = enumerator.CreateNotificationClient(false);
         notifications.DefaultDeviceChanged += (_, e) =>
         {
-            if (!AffectsSelection(e.Flow, e.Role, defaultInput, defaultOutput))
+            if (!AffectsSelection(e.Flow, e.Role, defaultInput, FollowDefaultOutput))
                 return;
             silence();
             Interlocked.Increment(ref version);

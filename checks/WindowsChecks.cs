@@ -37,12 +37,12 @@ internal static partial class Checks
     {
         var microphone = Descendants(window).OfType<ComboBox>().Single(control => control.AccessibleName == "Microphone");
         Assert(microphone.SelectedItem is AudioDevice { Id: "missing-test-mic", Unavailable: true }, "window preserves disconnected microphone selection");
-        window.ToggleListening();
+        Finish(window.ToggleListening());
         Assert(!window.IsListening && Preferences.Load(path).DeviceId == "missing-test-mic", "an unavailable microphone cannot open audio or overwrite the chosen endpoint");
         Assert(window.FormBorderStyle == FormBorderStyle.Sizable && window.MaximizeBox, "main window supports resizing and maximizing");
-        var meter = Descendants(window).OfType<LevelMeter>().Single();
+        var meter = Descendants(window).OfType<ProgressBar>().Single();
         _ = meter.Handle;
-        meter.Level = 72;
+        meter.Value = 72;
         Assert(meter.AccessibilityObject.Role == AccessibleRole.ProgressBar && meter.AccessibilityObject.Value?.Contains("72") == true,
             "assistive technology can read the live meter value and progress-bar role");
         var reminder = Descendants(window).OfType<CheckBox>().Single(control => control.Text == "Show visual reminder");
@@ -78,17 +78,44 @@ internal static partial class Checks
             using var exit = new EventWaitHandle(false, EventResetMode.AutoReset);
             using var window = new MainWindow(true, show, exit, path);
             _ = window.Handle;
-            window.ApplySchedule(DateTime.Now);
-            window.ToggleListening();
+            Finish(window.ApplySchedule(DateTime.Now));
+            Finish(window.ToggleListening());
             Assert(!window.IsListening && Descendants(window).OfType<Button>().Any(button => button.Text == "Back up and use new settings"),
                 "background startup with damaged preferences offers recovery and never starts audio");
             Assert(Descendants(window).OfType<Label>().Any(label => label.Text == "SETTINGS RECOVERY · MICROPHONE OFF") &&
                 !Descendants(window).OfType<CheckBox>().Single(control => control.Text == "Listen on a daily schedule").Enabled,
                 "recovery status explains the pause and blocks schedule changes until recovery");
-            window.Close();
+            CloseWindow(window);
             Assert(File.ReadAllText(path) == "original broken settings", "window initialization and shutdown preserve the damaged original");
+            using var recovered = new MainWindow(true, show, exit, path);
+            _ = recovered.Handle;
+            try
+            {
+                // An unavailable selection prevents this ordinary check from opening hardware,
+                // even if startup incorrectly tries to listen after recovery.
+                var microphone = Descendants(recovered).OfType<ComboBox>().Single(control => control.AccessibleName == "Microphone");
+                var missing = new AudioDevice { Id = "missing-recovery-mic", Name = "Disconnected microphone", Unavailable = true };
+                microphone.Items.Add(missing);
+                microphone.SelectedItem = missing;
+                var recover = Descendants(recovered).OfType<Button>().Single(button => button.Text == "Back up and use new settings");
+                typeof(Button).GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(recover, new object[] { EventArgs.Empty });
+                string backup = Directory.GetFiles(folder, "settings.xml.recovery-*").Single();
+                Assert(File.ReadAllText(backup) == "original broken settings" && !Preferences.Load(path).NeedsRecovery &&
+                    microphone.Enabled && Descendants(recovered).OfType<TrackBar>().Single().Enabled &&
+                    Descendants(recovered).OfType<CheckBox>().Single(control => control.Text == "Listen on a daily schedule").Enabled,
+                    "recovering settings preserves the original backup and restores settings controls");
+                InvokeMonitor(recovered, "TickMonitor");
+                Assert(!recovered.IsListening && Descendants(recovered).OfType<Label>().Any(label => label.Text.StartsWith("Original settings backed up to ")),
+                    "recovering before the first background tick stays paused without attempting to open the microphone");
+            }
+            finally { CloseWindow(recovered); }
         }
-        finally { File.Delete(path); Directory.Delete(folder); }
+        finally
+        {
+            foreach (string file in Directory.EnumerateFiles(folder))
+                File.Delete(file);
+            Directory.Delete(folder);
+        }
     }
 
     private static void InstallationChecks()
@@ -97,7 +124,8 @@ internal static partial class Checks
         string keyPath = @"Software\LittleQuieter.InstallChecks\" + Guid.NewGuid().ToString("N");
         Directory.CreateDirectory(folder);
         string source = Path.Combine(folder, "source.exe");
-        string installedFolder = Path.Combine(folder, "installed");
+        string localData = Path.Combine(folder, "local-é-音");
+        string installedFolder = Path.Combine(localData, "Programs", "LittleQuieter");
         string shortcut = Path.Combine(folder, "Little Quieter.lnk");
         using var run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
         object? startupBefore = run?.GetValue("LittleQuieter");
@@ -113,6 +141,46 @@ internal static partial class Checks
             Assert((string?)registration?.GetValue("DisplayName") == "Little Quieter" &&
                 ((string?)registration.GetValue("UninstallString"))?.Contains("Uninstall.ps1") == true &&
                 File.Exists(Path.Combine(installedFolder, "Uninstall.ps1")), "installation registers removal through Windows Installed apps");
+            using (var resource = typeof(Installation).Assembly.GetManifestResourceStream("LittleQuieter.THIRD-PARTY-NOTICES.txt")!)
+            using (var reader = new StreamReader(resource))
+                Assert(File.ReadAllText(Path.Combine(installedFolder, "THIRD-PARTY-NOTICES.txt")) == reader.ReadToEnd(),
+                    "installation includes embedded notices even without a companion file");
+            object shellLink = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046"), true)!)!;
+            try
+            {
+                ((System.Runtime.InteropServices.ComTypes.IPersistFile)shellLink).Load(shortcut, 0);
+                var target = new System.Text.StringBuilder(260);
+                var workingDirectory = new System.Text.StringBuilder(260);
+                var link = (ShellShortcut.IShellLink)shellLink;
+                link.GetPath(target, target.Capacity, IntPtr.Zero, 0);
+                link.GetWorkingDirectory(workingDirectory, workingDirectory.Capacity);
+                Assert(target.ToString() == program && workingDirectory.ToString() == installedFolder,
+                    "the native Shell shortcut preserves its Unicode target and working directory");
+            }
+            finally { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shellLink); }
+            var uninstallPreview = new System.Diagnostics.ProcessStartInfo("powershell.exe")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            uninstallPreview.Environment["LOCALAPPDATA"] = localData;
+            foreach (string argument in new[] { "-NoProfile", "-ExecutionPolicy", "Restricted", "-Command",
+                "& " + (string)registration!.GetValue("UninstallString")! + " -WhatIf" })
+                uninstallPreview.ArgumentList.Add(argument);
+            using (var preview = System.Diagnostics.Process.Start(uninstallPreview)!)
+            {
+                if (!preview.WaitForExit(10000))
+                {
+                    preview.Kill(true);
+                    throw new TimeoutException("The isolated uninstall preview did not finish.");
+                }
+                string output = preview.StandardOutput.ReadToEnd();
+                string error = preview.StandardError.ReadToEnd();
+                Assert(preview.ExitCode == 0 && !string.IsNullOrWhiteSpace(output) && error.Length == 0 && File.Exists(program),
+                    "the registered uninstaller previews successfully under a Restricted parent policy without removing files");
+            }
             File.WriteAllText(source, "updated test executable - never launched");
             Installation.Install(source, installedFolder, shortcut, keyPath);
             Assert(File.ReadAllText(program) == File.ReadAllText(source) && File.ReadAllText(program + ".previous") == "test executable - never launched", "updates replace the executable atomically and retain a rollback copy");
@@ -156,6 +224,7 @@ internal static partial class Checks
             catch (FileNotFoundException) { }
             Assert(!stopRequested && File.ReadAllBytes(program).SequenceEqual(programBefore),
                 "staging failures leave the installed app running and its executable untouched");
+            InstallationConcurrencyChecks(folder, installedFolder, shortcut, keyPath);
         }
         finally
         {
@@ -193,14 +262,93 @@ internal static partial class Checks
 
     private static void InvokeMonitor(MainWindow window, string method)
     {
-        typeof(MainWindow).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null);
+        if (typeof(MainWindow).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null) is Task operation)
+            Finish(operation);
+    }
+
+    private static void Finish(Task operation)
+    {
+        var timeout = System.Diagnostics.Stopwatch.StartNew();
+        while (!operation.IsCompleted)
+        {
+            if (timeout.Elapsed > TimeSpan.FromSeconds(10))
+                throw new TimeoutException("An asynchronous UI check did not finish.");
+            Application.DoEvents();
+            Thread.Sleep(1);
+        }
+        operation.GetAwaiter().GetResult();
+        Application.DoEvents();
+    }
+
+    private static void CloseWindow(MainWindow window)
+    {
+        window.Close();
+        Finish(window.AudioIdle);
+    }
+
+    private static void CheckDisposedWindow(bool listening)
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "LittleQuieter-dispose-check-" + Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(folder, "settings.xml");
+        new Preferences { PlayTone = false, ToneVolume = 0, ShowReminder = false }.Save(path);
+        try
+        {
+            using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var exit = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var window = new MainWindow(true, show, exit, path);
+            _ = window.Handle;
+            var timer = (System.Windows.Forms.Timer)typeof(MainWindow).GetField("timer", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
+            var tray = (NotifyIcon)typeof(MainWindow).GetField("tray", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
+            var menu = tray.ContextMenuStrip!;
+            var reminder = (ReminderWindow)typeof(MainWindow).GetField("reminder", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
+            if (listening)
+            {
+                Finish(window.ToggleListening());
+                Assert(window.IsListening, "the disposal check starts listening at zero volume");
+            }
+            window.Dispose();
+            Finish(window.AudioIdle);
+            Assert(!timer.Enabled && !tray.Visible && menu.IsDisposed && reminder.IsDisposed,
+                "disposing a window directly releases its timer, tray menu and reminder");
+            if (listening)
+                Assert(SpinWait.SpinUntil(() => !AudioDevice.HasActiveSession(DataFlow.Capture) && !AudioDevice.HasActiveSession(DataFlow.Render), 1500),
+                    "disposing a listening window releases both audio streams");
+        }
+        finally { File.Delete(path); Directory.Delete(folder); }
+    }
+
+    private static void CheckShutdownSaveFailure()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "LittleQuieter-shutdown-check-" + Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(folder, "settings.xml");
+        new Preferences { PlayTone = false, ToneVolume = 0 }.Save(path);
+        try
+        {
+            using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var exit = new EventWaitHandle(false, EventResetMode.AutoReset);
+            using var window = new MainWindow(true, show, exit, path);
+            _ = window.Handle;
+            Descendants(window).OfType<TrackBar>().Single().Value++;
+            File.SetAttributes(path, FileAttributes.ReadOnly);
+            var closing = new FormClosingEventArgs(CloseReason.WindowsShutDown, false);
+            typeof(Form).GetMethod("OnFormClosing", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, new object[] { closing });
+            Assert(!closing.Cancel && Descendants(window).OfType<Label>().Any(label => label.Text.StartsWith("Couldn't save settings:")),
+                "a settings write failure does not block Windows shutdown with a modal dialog");
+        }
+        finally
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+            foreach (string file in Directory.EnumerateFiles(folder))
+                File.Delete(file);
+            Directory.Delete(folder);
+        }
     }
 
     private static void CheckPreviewOutputChanges()
     {
         string folder = Path.Combine(Path.GetTempPath(), "LittleQuieter-preview-check-" + Guid.NewGuid().ToString("N"));
         string path = Path.Combine(folder, "settings.xml");
-        new Preferences { PlayTone = false, ToneVolume = 0, ShowReminder = false }.Save(path);
+        new Preferences { PlayTone = false, ToneVolume = 0, ShowReminder = false, ScheduleEnabled = true, ScheduleStartMinute = 0, ScheduleEndMinute = 0 }.Save(path);
         try
         {
             using var show = new EventWaitHandle(false, EventResetMode.AutoReset);
@@ -209,20 +357,31 @@ internal static partial class Checks
             _ = window.Handle;
             try
             {
+                Assert(Descendants(window).OfType<Button>().Single(button => button.Text == "Test tone (2s)").Enabled,
+                    "explicit tone testing remains available outside scheduled listening hours");
                 InvokeMonitor(window, "PreviewAlarm");
                 var alarm = (AlarmTone)typeof(MainWindow).GetField("alarm", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
-                Assert(alarm.IsReady && !window.IsListening, "paused preview prepares only a zero-volume render stream");
+                Assert(alarm.IsReady && alarm.IsActive && !window.IsListening,
+                    "an explicit preview gates the zero-volume test source even when automatic tones and scheduled listening are off");
+                alarm.Player.Stop();
+                Assert(SpinWait.SpinUntil(() => alarm.Fault != null, 1000), "a stopped preview reports an output fault");
+                InvokeMonitor(window, "TickMonitor");
+                Assert(Descendants(window).OfType<Label>().Any(label => label.Text.StartsWith("Tone output stopped.")),
+                    "output failures are explained while the microphone is paused");
+                InvokeMonitor(window, "PreviewAlarm");
+                Assert(alarm.IsReady && alarm.Fault == null, "testing again prepares a fresh output after a preview failure");
                 var output = Descendants(window).OfType<ComboBox>().Single(control => control.AccessibleName == "Alarm output. Only changes Little Quieter");
                 var missing = new AudioDevice { Id = "missing-preview-output", Name = "Missing preview output", Unavailable = true };
                 output.Items.Add(missing);
                 output.SelectedItem = missing;
+                Finish(window.AudioIdle);
                 Assert(!alarm.IsReady && !alarm.IsActive, "changing the preview output immediately closes the old endpoint and cancels the preview");
                 InvokeMonitor(window, "PreviewAlarm");
                 Assert(!alarm.IsReady && alarm.Fault == null &&
                     Descendants(window).OfType<Label>().Any(label => label.Text.StartsWith("Tone unavailable.")),
                     "previewing an unavailable new output reports failure instead of reusing the previous endpoint");
             }
-            finally { window.Close(); }
+            finally { CloseWindow(window); }
         }
         finally { File.Delete(path); Directory.Delete(folder); }
     }
@@ -246,11 +405,16 @@ internal static partial class Checks
                 InvokeMonitor(window, "PreviewAlarm");
                 Assert(!alarm.IsReady && Descendants(window).OfType<Label>().Any(label => label.Text.StartsWith("Tone unavailable.")),
                     "a missing legacy output cannot route a preview to the Windows default");
+                Descendants(window).OfType<CheckBox>().Single(control => control.Text == "Play steady alarm tone").Checked = true;
+                Finish(window.AudioIdle);
+                Assert(!alarm.HasOutput && Descendants(window).OfType<Label>().Any(label => label.Text == "Automatic tone is off."),
+                    "disabling automatic sound at zero volume clears an irrelevant output error without opening a stream");
                 output.SelectedIndex = -1;
+                Finish(window.AudioIdle);
                 InvokeMonitor(window, "PreviewAlarm");
                 Assert(!alarm.IsReady, "an empty output selection cannot implicitly open the Windows default");
             }
-            finally { window.Close(); }
+            finally { CloseWindow(window); }
         }
         finally { File.Delete(path); Directory.Delete(folder); }
     }
@@ -272,7 +436,7 @@ internal static partial class Checks
                     foreach (string outcome in new[] { "cancel", "failure", "success", "device change" })
                     {
                         if (window.IsListening != listening)
-                            window.ToggleListening();
+                            Finish(window.ToggleListening());
                         var limit = Descendants(window).OfType<TrackBar>().Single();
                         limit.Value = 50;
                         InvokeMonitor(window, "ToggleCalibration");
@@ -296,12 +460,12 @@ internal static partial class Checks
                         Assert(window.IsListening == listening && limit.Enabled && (outcome == "success" ? limit.Value > 50 : limit.Value == 50),
                             "learning " + outcome + " restores the previous " + (listening ? "listening" : "paused") + " state and applies only a successful limit");
                         if (!listening)
-                            Assert(!HasActiveSession(DataFlow.Capture) && !HasActiveSession(DataFlow.Render) &&
+                            Assert(!AudioDevice.HasActiveSession(DataFlow.Capture) && !AudioDevice.HasActiveSession(DataFlow.Render) &&
                                 Descendants(window).OfType<Label>().Any(label => label.Text == "PAUSED · MICROPHONE OFF"),
                                 "finishing learning from paused releases both streams and keeps the paused status");
                     }
             }
-            finally { window.Close(); }
+            finally { CloseWindow(window); }
         }
         finally { File.Delete(path); Directory.Delete(folder); }
     }
@@ -331,19 +495,19 @@ internal static partial class Checks
                 try
                 {
                     InvokeMonitor(window, "TickMonitor");
-                    Assert(!window.IsListening && !HasActiveSession(DataFlow.Capture) && !HasActiveSession(DataFlow.Render),
+                    Assert(!window.IsListening && !AudioDevice.HasActiveSession(DataFlow.Capture) && !AudioDevice.HasActiveSession(DataFlow.Render),
                         "an update preserves a manual pause with scheduling " + (scheduled ? "on" : "off"));
-                    window.ToggleListening();
+                    Finish(window.ToggleListening());
                     Assert(window.IsListening && Installation.IsCapturing(Environment.ProcessId),
                         "manual listening still resumes after a paused update at zero test volume");
-                    window.ToggleListening();
+                    Finish(window.ToggleListening());
                     if (scheduled)
                     {
-                        window.ApplySchedule(now.AddDays(1));
+                        Finish(window.ApplySchedule(now.AddDays(1)));
                         Assert(window.IsListening, "the next scheduled period resumes after a pause preserved through update");
                     }
                 }
-                finally { window.Close(); }
+                finally { CloseWindow(window); }
             }
             new Preferences
             {
@@ -362,12 +526,12 @@ internal static partial class Checks
                 InvokeMonitor(next, "TickMonitor");
                 Assert(next.IsListening, "a pause from the previous daily period does not suppress today's scheduled listening");
             }
-            finally { next.Close(); }
+            finally { CloseWindow(next); }
         }
         finally { File.Delete(path); Directory.Delete(folder); }
     }
 
-    private static void PreviewWindow(string imagePath)
+    private static void PreviewWindow(string imagePath, bool settingsExpanded, bool narrow)
     {
         string folder = Path.Combine(Path.GetTempPath(), "LittleQuieter-preview-" + Guid.NewGuid().ToString("N"));
         string path = Path.Combine(folder, "settings.xml");
@@ -384,12 +548,14 @@ internal static partial class Checks
             window.ShowInTaskbar = false;
             window.Show();
             window.Enabled = true;
-            window.ClientSize = new Size(650, 1050);
+            window.ClientSize = new Size(narrow ? 420 : 620, settingsExpanded ? 980 : 540);
+            if (settingsExpanded)
+                Descendants(window).OfType<Button>().Single(button => button.Text == "Show devices, startup and schedule").PerformClick();
             window.PerformLayout();
             using var bitmap = new Bitmap(window.Width, window.Height);
             window.DrawToBitmap(bitmap, new Rectangle(Point.Empty, window.Size));
             bitmap.Save(imagePath);
-            window.Close();
+            CloseWindow(window);
         }
         finally { File.Delete(path); Directory.Delete(folder); }
     }

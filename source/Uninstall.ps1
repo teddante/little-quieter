@@ -1,11 +1,17 @@
 [CmdletBinding(SupportsShouldProcess)]
 param()
 $ErrorActionPreference = 'Stop'
+$operationLock = $null
+$ownsLock = $false
 try {
     $expectedFolder = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs\LittleQuieter')).TrimEnd('\')
     $installFolder = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
     if ($installFolder -ne $expectedFolder) { throw 'Run the uninstaller from the Little Quieter installation folder.' }
     if (!$PSCmdlet.ShouldProcess($installFolder, 'Uninstall Little Quieter (keep personal settings)')) { return }
+    $operationLock = [Threading.Mutex]::new($false, 'Local\LittleQuieter.Install.v1')
+    try { $ownsLock = $operationLock.WaitOne(0) }
+    catch [Threading.AbandonedMutexException] { $ownsLock = $true }
+    if (!$ownsLock) { throw 'Another Little Quieter installation or removal is in progress. Try again when it finishes.' }
     $program = Join-Path $installFolder 'Little Quieter.exe'
     $running = @(Get-Process -Name 'Little Quieter' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $program })
     if ($running.Count -gt 0) {
@@ -32,4 +38,7 @@ try {
     Add-Type -AssemblyName System.Windows.Forms
     [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Little Quieter could not be removed') | Out-Null
     throw
+} finally {
+    if ($ownsLock) { $operationLock.ReleaseMutex() }
+    if ($null -ne $operationLock) { $operationLock.Dispose() }
 }

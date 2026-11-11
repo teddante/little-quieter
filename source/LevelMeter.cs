@@ -2,41 +2,47 @@ using System.ComponentModel;
 
 namespace LittleQuieter;
 
+// A live meter needs immediate painting and a threshold cue, without progress animation.
+// Keep ProgressBar's native range and accessibility provider.
 internal sealed class LevelMeter : ProgressBar
 {
+    private int limit = Levels.DefaultLimit;
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    public double Level
+    public int Limit
     {
-        get => Value;
-        set => Value = (int)Math.Round(Math.Clamp(value, 0, 100));
+        get => limit;
+        set
+        {
+            limit = value;
+            Invalidate();
+        }
     }
-    public int Limit = Levels.DefaultLimit;
+
     public LevelMeter()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
-        AccessibleName = "Live microphone level with warning limit";
-        AccessibleDescription = "Relative microphone level, from 0 to 100. The warning limit is adjustable below.";
+        AccessibleName = "Live microphone level";
+        AccessibleDescription = "Relative microphone level from 0 to 100, with a warning-limit marker.";
     }
+
+    public void SetLevel(double level)
+    {
+        Value = (int)Math.Round(Math.Clamp(level, 0, 100));
+        Invalidate();
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
-        var g = e.Graphics;
-        g.Clear(BackColor);
-        const int segments = 48;
-        float width = (Width - (segments - 1) * 3) / (float)segments;
-        bool highContrast = SystemInformation.HighContrast;
-        using var belowLimit = new SolidBrush(SystemColors.Highlight);
-        using var aboveLimit = new SolidBrush(highContrast ? SystemColors.Highlight : SystemColors.WindowText);
-        using var inactive = new SolidBrush(SystemColors.ControlDark);
-        for (int i = 0; i < segments; i++)
-        {
-            double position = (i + 1) * 100.0 / segments;
-            Brush brush = position > Level ? inactive : position < Limit ? belowLimit : aboveLimit;
-            g.FillRectangle(brush, i * (width + 3), 3, width, Height - 6);
-        }
-        using (var pen = new Pen(SystemColors.WindowText, 2))
-        {
-            float x = (float)Math.Min(Width - 2, Math.Max(1, Width * Limit / 100.0));
-            g.DrawLine(pen, x, 0, x, Height);
-        }
+        e.Graphics.Clear(SystemColors.Control);
+        Rectangle area = ClientRectangle;
+        area.Inflate(-2, -2);
+        if (area.Width <= 0 || area.Height <= 0)
+            return;
+        using var fill = new SolidBrush(SystemColors.Highlight);
+        using var marker = new Pen(SystemColors.WindowText, Math.Max(1, DeviceDpi / 96f));
+        e.Graphics.FillRectangle(fill, area.Left, area.Top, area.Width * Value / 100f, area.Height);
+        float x = area.Left + area.Width * Limit / 100f;
+        e.Graphics.DrawLine(marker, x, 0, x, Height);
+        e.Graphics.DrawRectangle(marker, 0, 0, Width - 1, Height - 1);
     }
 }
